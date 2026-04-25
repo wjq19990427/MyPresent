@@ -4,6 +4,20 @@
 
 ---
 
+## [v2.4.0] - 2026-04-25
+
+### 新增
+
+- **文件分类存储**：上传文件按类型自动路由到 `images/` / `videos/` / `text/` 子目录
+  - `_file_subdir(filename)` 辅助函数：根据扩展名返回对应子目录名
+  - `ensure_dirs()` 同步创建 Final 和 Pending 下的 6 个子目录
+  - `_write_files()` 新文件写入时自动路由到对应子目录
+  - `move_to_final()` 从 Pending 移入 Final 时同样按类型路由
+  - 历史已归档文件一次性迁移至对应子目录，`pending_db.json` 路径同步更新
+  - 向量库重新索引，确保 ChromaDB metadata 与最新路径一致
+
+---
+
 ## [v2.3.0] - 2026-04-25
 
 ### 新增

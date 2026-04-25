@@ -18,12 +18,21 @@ DB_FILE       = Path("pending_db.json")
 VECTOR_DB_DIR = Path(__file__).parent / "vector_db"
 COLS          = 3
 TEXT_EXTS     = {".txt", ".md"}
+IMAGE_EXTS    = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
 # 所有支持上传的视频格式
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm",
               ".flv", ".m4v", ".3gp", ".ts", ".mts", ".mpg", ".mpeg"}
 # 浏览器 HTML5 可直接播放的格式
 VIDEO_EXTS_PLAYABLE = {".mp4", ".webm", ".mov", ".m4v", ".ogg"}
+
+
+def _file_subdir(filename: str) -> str:
+    """根据扩展名返回子目录名：images / videos / text。"""
+    ext = Path(filename).suffix.lower()
+    if ext in IMAGE_EXTS:  return "images"
+    if ext in VIDEO_EXTS:  return "videos"
+    return "text"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -74,8 +83,9 @@ REQUIRED_KEYS = [f["key"] for f in FIELD_SCHEMA if f["required"]]
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def ensure_dirs() -> None:
-    FINAL_DIR.mkdir(parents=True, exist_ok=True)
-    PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    for base in (FINAL_DIR, PENDING_DIR):
+        for sub in ("images", "videos", "text"):
+            (base / sub).mkdir(parents=True, exist_ok=True)
     VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -140,11 +150,15 @@ def _make_session(
 def _write_files(
     file_data_list: list[tuple], dest_dir: Path, session_id: str
 ) -> list[dict]:
-    """data 可以是 bytes 或 file-like 对象（大文件流式写入，避免内存双倍占用）。"""
+    """data 可以是 bytes 或 file-like 对象（大文件流式写入，避免内存双倍占用）。
+    文件按类型自动存入 images / videos / text 子目录。
+    """
     entries = []
     for idx, (data, orig_name) in enumerate(file_data_list):
         filename = f"{session_id}_{idx:03d}_{orig_name}"
-        dest     = dest_dir / filename
+        sub      = _file_subdir(filename)
+        dest     = dest_dir / sub / filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
         if hasattr(data, "read"):
             with dest.open("wb") as f:
                 shutil.copyfileobj(data, f)
@@ -230,7 +244,9 @@ def move_to_final(session_id: str) -> None:
         return
     for fe in session["files"]:
         src  = Path(fe["path"])
-        dest = FINAL_DIR / fe["filename"]
+        sub  = _file_subdir(fe["filename"])
+        dest = FINAL_DIR / sub / fe["filename"]
+        dest.parent.mkdir(parents=True, exist_ok=True)
         if src.exists():
             shutil.move(str(src), str(dest))
         fe["path"] = str(dest)
@@ -341,28 +357,30 @@ def _build_embed_text(session: dict) -> str:
     return "\n".join(parts)
 
 
-def _parse_date_iso(raw: str) -> str:
-    """尝试将 content_time 原始值解析为 YYYY-MM-DD，失败返回空字符串。"""
+def _parse_date_iso(raw: str) -> tuple[str, int]:
+    """将 content_time 解析为 (YYYY-MM-DD, YYYYMMDD整数)；无法解析返回 ('', 0)。"""
     for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d",
                 "%Y-%m",   "%Y/%m",    "%Y"):
         try:
-            return datetime.strptime(raw.strip(), fmt).strftime("%Y-%m-%d")
+            dt = datetime.strptime(raw.strip(), fmt)
+            return dt.strftime("%Y-%m-%d"), int(dt.strftime("%Y%m%d"))
         except ValueError:
             continue
-    return ""
+    return "", 0
 
 
 def _build_chroma_metadata(session: dict) -> dict:
-    raw = str(session.get("content_time", "")).strip()
-    iso = _parse_date_iso(raw)
+    raw      = str(session.get("content_time", "")).strip()
+    iso, num = _parse_date_iso(raw)
     return {
-        "session_id":       session["session_id"],
-        "content_time_raw": raw,
-        "content_time_iso": iso,
-        "has_exact_date":   iso != "",
-        "upload_time":      session.get("upload_time", ""),
-        "archive_time":     session.get("archive_time", ""),
-        "source_type":      session.get("source_type", ""),
+        "session_id":        session["session_id"],
+        "content_time_raw":  raw,
+        "content_time_iso":  iso,
+        "content_time_num":  num,   # int YYYYMMDD，供 $gte/$lte 数值比较
+        "has_exact_date":    iso != "",
+        "upload_time":       session.get("upload_time", ""),
+        "archive_time":      session.get("archive_time", ""),
+        "source_type":       session.get("source_type", ""),
     }
 
 
@@ -406,19 +424,39 @@ def index_existing_finals() -> int:
 
 
 def _ensure_indexed() -> None:
-    """应用启动时调用，补全历史 Final 记录的向量索引。"""
+    """应用启动时调用，补全历史 Final 记录的向量索引。
+    若检测到 metadata schema 升级（缺少 content_time_num），自动全量重建。
+    """
     if st.session_state.get("_vector_db_ready"):
         return
+    st.session_state["_vector_db_ready"] = True
     db     = load_db()
     finals = [s for s in db if s.get("status") == "final"]
-    st.session_state["_vector_db_ready"] = True
     if not finals:
         return
     try:
         with st.spinner("🗄️ 正在初始化向量库…"):
-            count = index_existing_finals()
+            col      = _get_collection()
+            existing = col.get(include=["metadatas"])
+            existing_ids = set(existing["ids"])
+
+            # 检测旧 schema（缺少 content_time_num 字段）→ 全量重建
+            needs_migration = bool(existing["metadatas"]) and \
+                              "content_time_num" not in existing["metadatas"][0]
+
+            if needs_migration:
+                for s in finals:
+                    embed_session(s)
+                count = len(finals)
+            else:
+                to_index = [s for s in finals if s["session_id"] not in existing_ids]
+                for s in to_index:
+                    embed_session(s)
+                count = len(to_index)
+
         if count > 0:
-            st.toast(f"向量库已补全索引：{count} 条历史归档记录", icon="🗄️")
+            label = "已迁移并重建" if needs_migration else "已补全索引"
+            st.toast(f"向量库{label}：{count} 条归档记录", icon="🗄️")
     except Exception as e:
         st.warning(f"向量库初始化失败（搜索功能不可用）：{e}")
 
@@ -585,10 +623,17 @@ def _render_comments(session: dict) -> None:
 
 def init_state() -> None:
     for k, v in {
-        "upload_key":        0,
-        "pending_selected":  None,
-        "archived_selected": None,
-        "search_selected":   None,
+        "upload_key":          0,
+        "pending_selected":    None,
+        "archived_selected":   None,
+        "search_selected":     None,
+        # 搜索结果持久化（rerun 后仍可展示详情）
+        "semantic_results":    None,   # list[(sid, score)] | None
+        "semantic_query_used": "",
+        "date_filter_exact":   None,   # list[(sid, meta)] | None
+        "date_filter_fuzzy":   None,   # list[sid] | None
+        "date_filter_range":   ("", ""),
+        "_search_mode_prev":   None,
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -776,10 +821,15 @@ def _render_card(
             st.rerun()
 
 
-def _render_detail(session: dict, mode: str) -> None:
-    """共用详情 + 编辑表单，mode='pending'|'final'。"""
-    sid       = session["session_id"]
-    state_key = "pending_selected" if mode == "pending" else "archived_selected"
+def _render_detail(
+    session: dict, mode: str, state_key: str | None = None
+) -> None:
+    """共用详情 + 编辑表单，mode='pending'|'final'。
+    state_key 默认由 mode 推导，搜索 Tab 需显式传入 'search_selected'。
+    """
+    sid = session["session_id"]
+    if state_key is None:
+        state_key = "pending_selected" if mode == "pending" else "archived_selected"
     title     = session["files"][0]["original_name"] if session["files"] else "记录"
     is_text   = _is_text_session(session)
 
@@ -1000,75 +1050,94 @@ def _render_search_results(sessions_scores: list[tuple], state_key: str) -> None
         target = db_map.get(sel)
         if target:
             st.divider()
-            _render_detail(target, "final")
+            _render_detail(target, "final", state_key=state_key)
 
 
 def _render_date_filter() -> None:
-    """Phase 2.2：日期范围过滤检索。"""
+    """Phase 2.2：日期范围过滤检索。结果持久化到 session_state，rerun 后仍可展示详情。"""
     c1, c2 = st.columns(2)
     with c1:
         start = st.date_input("开始日期", value=None, key="filter_start")
     with c2:
         end = st.date_input("结束日期", value=None, key="filter_end")
 
-    if st.button("🔍 查询", type="primary", key="date_filter_btn"):
+    bc1, bc2 = st.columns([1, 5])
+    with bc1:
+        do_search = st.button("🔍 查询", type="primary", key="date_filter_btn")
+    with bc2:
+        if st.button("清除结果", key="date_filter_clear"):
+            st.session_state["date_filter_exact"] = None
+            st.session_state["date_filter_fuzzy"] = None
+            st.session_state["search_selected"]   = None
+            st.rerun()
+
+    if do_search:
         if not start or not end:
             st.warning("请选择开始和结束日期")
-            return
-        if start > end:
+        elif start > end:
             st.error("开始日期不能晚于结束日期")
-            return
-
-        start_str = start.strftime("%Y-%m-%d")
-        end_str   = end.strftime("%Y-%m-%d")
-
-        try:
-            col = _get_collection()
-            total = col.count()
-            if total == 0:
-                st.info("向量库暂无数据，请先归档一些记录。")
-                return
-
-            # 精确日期且在范围内
-            exact = col.get(
-                where={"$and": [
-                    {"has_exact_date": {"$eq": True}},
-                    {"content_time_iso": {"$gte": start_str}},
-                    {"content_time_iso": {"$lte": end_str}},
-                ]},
-                include=["metadatas"],
-            )
-            # 模糊时间（无法按日期过滤）
-            fuzzy = col.get(
-                where={"has_exact_date": {"$eq": False}},
-                include=["metadatas"],
-            )
-        except Exception as e:
-            st.error(f"查询失败：{e}")
-            return
-
-        st.divider()
-        exact_ids = exact["ids"]
-        st.markdown(f"### 📅 精确日期匹配（{len(exact_ids)} 条）")
-        if exact_ids:
-            # 按 content_time_iso 排序
-            meta_map = {m["session_id"]: m for m in exact["metadatas"]}
-            sorted_ids = sorted(exact_ids,
-                                key=lambda i: meta_map[i].get("content_time_iso", ""),
-                                reverse=True)
-            _render_search_results([(sid, None) for sid in sorted_ids], "search_selected")
         else:
-            st.caption(f"该日期范围（{start_str} 至 {end_str}）内无精确日期记录")
+            start_num = int(start.strftime("%Y%m%d"))
+            end_num   = int(end.strftime("%Y%m%d"))
+            try:
+                col   = _get_collection()
+                total = col.count()
+                if total == 0:
+                    st.info("向量库暂无数据，请先归档一些记录。")
+                else:
+                    exact = col.get(
+                        where={"$and": [
+                            {"has_exact_date":   {"$eq": True}},
+                            {"content_time_num": {"$gte": start_num}},
+                            {"content_time_num": {"$lte": end_num}},
+                        ]},
+                        include=["metadatas"],
+                    )
+                    fuzzy = col.get(
+                        where={"has_exact_date": {"$eq": False}},
+                        include=["metadatas"],
+                    )
+                    st.session_state["date_filter_exact"] = list(
+                        zip(exact["ids"], exact["metadatas"])
+                    )
+                    st.session_state["date_filter_fuzzy"] = fuzzy["ids"]
+                    st.session_state["date_filter_range"] = (
+                        start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+                    )
+                    st.session_state["search_selected"] = None
+            except Exception as e:
+                st.error(f"查询失败：{e}")
 
-        fuzzy_ids = fuzzy["ids"]
-        if fuzzy_ids:
-            st.divider()
-            with st.expander(f"⚠️ 以下 {len(fuzzy_ids)} 条记录使用了模糊时间描述，无法按日期过滤"):
-                _render_search_results([(sid, None) for sid in fuzzy_ids], "search_selected")
+    # ── 渲染持久化的结果（卡片 rerun 后仍存在）──────────────────────────
+    exact_data = st.session_state.get("date_filter_exact")
+    if exact_data is None:
+        return
+
+    fuzzy_ids          = st.session_state.get("date_filter_fuzzy") or []
+    start_str, end_str = st.session_state.get("date_filter_range", ("", ""))
+
+    st.divider()
+    st.markdown(f"### 📅 精确日期匹配（{len(exact_data)} 条）")
+    if exact_data:
+        sorted_data = sorted(exact_data,
+                             key=lambda x: x[1].get("content_time_num", 0),
+                             reverse=True)
+        _render_search_results(
+            [(sid, None) for sid, _ in sorted_data], "search_selected"
+        )
+    else:
+        st.caption(f"该日期范围（{start_str} 至 {end_str}）内无精确日期记录")
+
+    if fuzzy_ids:
+        st.divider()
+        with st.expander(f"⚠️ 以下 {len(fuzzy_ids)} 条记录使用了模糊时间描述，无法按日期过滤"):
+            _render_search_results(
+                [(sid, None) for sid in fuzzy_ids], "search_selected"
+            )
 
 
 def _render_semantic_search() -> None:
-    """Phase 2.3：自然语言语义检索。"""
+    """Phase 2.3：自然语言语义检索。结果持久化到 session_state，rerun 后仍可展示详情。"""
     query = st.text_input(
         "描述你想找的内容",
         placeholder="例如：和朋友一起看日落的那次旅行……",
@@ -1077,46 +1146,56 @@ def _render_semantic_search() -> None:
     top_k = st.slider("最多返回结果数", min_value=1, max_value=10, value=5,
                       key="semantic_topk")
 
-    if not st.button("🔍 开始检索", type="primary", key="semantic_btn"):
+    bc1, bc2 = st.columns([1, 5])
+    with bc1:
+        do_search = st.button("🔍 检索", type="primary", key="semantic_btn")
+    with bc2:
+        if st.button("清除结果", key="semantic_clear"):
+            st.session_state["semantic_results"]    = None
+            st.session_state["semantic_query_used"] = ""
+            st.session_state["search_selected"]     = None
+            st.rerun()
+
+    if do_search:
+        if not query.strip():
+            st.warning("请输入检索内容")
+        else:
+            try:
+                col   = _get_collection()
+                total = col.count()
+                if total == 0:
+                    st.info("向量库暂无数据，请先归档一些记录。")
+                else:
+                    with st.spinner("检索中…"):
+                        query_text = "为这个句子生成表示以用于检索相关文章：" + query.strip()
+                        embedding  = _get_embedder().encode(
+                            query_text, normalize_embeddings=True
+                        ).tolist()
+                        results = col.query(
+                            query_embeddings=[embedding],
+                            n_results=min(top_k, total),
+                            include=["metadatas", "distances"],
+                        )
+                    pairs = [
+                        (sid, 1 - dist)
+                        for sid, dist in zip(results["ids"][0], results["distances"][0])
+                    ]
+                    st.session_state["semantic_results"]    = pairs
+                    st.session_state["semantic_query_used"] = query.strip()
+                    st.session_state["search_selected"]     = None
+            except Exception as e:
+                st.error(f"检索失败：{e}")
+
+    # ── 渲染持久化的结果（卡片 rerun 后仍存在）──────────────────────────
+    pairs = st.session_state.get("semantic_results")
+    if not pairs:
         return
-    if not query.strip():
-        st.warning("请输入检索内容")
-        return
-
-    try:
-        col   = _get_collection()
-        total = col.count()
-        if total == 0:
-            st.info("向量库暂无数据，请先归档一些记录。")
-            return
-
-        # BGE 非对称检索：query 加前缀，document 不加
-        query_text = "为这个句子生成表示以用于检索相关文章：" + query.strip()
-        embedding  = _get_embedder().encode(
-            query_text, normalize_embeddings=True
-        ).tolist()
-
-        results = col.query(
-            query_embeddings=[embedding],
-            n_results=min(top_k, total),
-            include=["metadatas", "distances"],
-        )
-    except Exception as e:
-        st.error(f"检索失败：{e}")
-        return
-
-    ids       = results["ids"][0]
-    distances = results["distances"][0]
-
-    if not ids:
-        st.info("没有找到相关记录。")
-        return
-
-    # cosine distance → similarity
-    pairs = [(sid, 1 - dist) for sid, dist in zip(ids, distances)]
 
     st.divider()
-    st.markdown(f"### 🎯 语义检索结果（Top {len(pairs)}）")
+    q = st.session_state.get("semantic_query_used", "")
+    st.markdown(f"### 🎯 语义检索结果（{len(pairs)} 条）")
+    if q:
+        st.caption(f"检索词：{q}")
     _render_search_results(pairs, "search_selected")
 
 
@@ -1127,6 +1206,15 @@ def render_search_tab() -> None:
         horizontal=True,
         key="search_mode",
     )
+
+    # 切换模式时清空上一个模式的结果和选中状态
+    prev = st.session_state.get("_search_mode_prev")
+    if prev != mode:
+        st.session_state["semantic_results"]  = None
+        st.session_state["date_filter_exact"] = None
+        st.session_state["date_filter_fuzzy"] = None
+        st.session_state["search_selected"]   = None
+        st.session_state["_search_mode_prev"] = mode
 
     if mode == "💬 智能问答（即将上线）":
         st.info("智能问答功能正在开发中（Phase 2.4），敬请期待。")
