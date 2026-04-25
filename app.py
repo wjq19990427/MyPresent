@@ -11,12 +11,19 @@ import streamlit as st
 from PIL import Image, ImageDraw
 
 # ─── 路径常量 ──────────────────────────────────────────────────────────────────
-ASSETS_DIR  = Path("Assets")
-FINAL_DIR   = ASSETS_DIR / "Final"
-PENDING_DIR = ASSETS_DIR / "Pending"
-DB_FILE     = Path("pending_db.json")
-COLS        = 3
-TEXT_EXTS   = {".txt", ".md"}
+ASSETS_DIR    = Path("Assets")
+FINAL_DIR     = ASSETS_DIR / "Final"
+PENDING_DIR   = ASSETS_DIR / "Pending"
+DB_FILE       = Path("pending_db.json")
+VECTOR_DB_DIR = Path(__file__).parent / "vector_db"
+COLS          = 3
+TEXT_EXTS     = {".txt", ".md"}
+
+# 所有支持上传的视频格式
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".webm",
+              ".flv", ".m4v", ".3gp", ".ts", ".mts", ".mpg", ".mpeg"}
+# 浏览器 HTML5 可直接播放的格式
+VIDEO_EXTS_PLAYABLE = {".mp4", ".webm", ".mov", ".m4v", ".ogg"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -69,6 +76,7 @@ REQUIRED_KEYS = [f["key"] for f in FIELD_SCHEMA if f["required"]]
 def ensure_dirs() -> None:
     FINAL_DIR.mkdir(parents=True, exist_ok=True)
     PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_db() -> list[dict]:
@@ -132,11 +140,16 @@ def _make_session(
 def _write_files(
     file_data_list: list[tuple], dest_dir: Path, session_id: str
 ) -> list[dict]:
+    """data 可以是 bytes 或 file-like 对象（大文件流式写入，避免内存双倍占用）。"""
     entries = []
     for idx, (data, orig_name) in enumerate(file_data_list):
         filename = f"{session_id}_{idx:03d}_{orig_name}"
         dest     = dest_dir / filename
-        dest.write_bytes(data)
+        if hasattr(data, "read"):
+            with dest.open("wb") as f:
+                shutil.copyfileobj(data, f)
+        else:
+            dest.write_bytes(data)
         entries.append({
             "filename":      filename,
             "original_name": orig_name,
@@ -207,6 +220,7 @@ def save_session_final(
     db.append(session)
     save_db(db)
     _write_md(session)
+    embed_session(session)
 
 
 def move_to_final(session_id: str) -> None:
@@ -225,6 +239,7 @@ def move_to_final(session_id: str) -> None:
     session["is_complete"]  = True
     save_db(db)
     _write_md(session)
+    embed_session(session)
 
 
 def update_session_fields(session_id: str, new_values: dict) -> None:
@@ -240,7 +255,7 @@ def update_session_fields(session_id: str, new_values: dict) -> None:
         for f in FIELD_SCHEMA:
             k = f["key"]
             if is_text and k == "description":
-                continue  # 文字记录的描述由内容自动填充，不追踪变更
+                continue
             old = str(session.get(k, "")).strip()
             new = str(new_values.get(k, "")).strip()
             if old != new:
@@ -256,6 +271,7 @@ def update_session_fields(session_id: str, new_values: dict) -> None:
 
     if session.get("status") == "final":
         _write_md(session)
+        embed_session(session)
 
 
 def add_comment(session_id: str, text: str) -> None:
@@ -288,6 +304,123 @@ def delete_comment(session_id: str, comment_id: str) -> None:
     save_db(db)
     if session.get("status") == "final":
         _write_md(session)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 向量数据库 — Phase 2.1 Embedding 层
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_resource(show_spinner="正在加载 Embedding 模型（首次需要下载，请稍候）…")
+def _get_embedder():
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer("BAAI/bge-small-zh-v1.5")
+
+
+@st.cache_resource(show_spinner="正在初始化向量数据库…")
+def _get_collection():
+    import chromadb
+    client = chromadb.PersistentClient(path=str(VECTOR_DB_DIR))
+    return client.get_or_create_collection(
+        name="sessions",
+        metadata={"hnsw:space": "cosine"},
+    )
+
+
+def _build_embed_text(session: dict) -> str:
+    """将 session 的文本字段拼接为用于 embedding 的文档字符串。"""
+    parts = []
+    for key, label in [
+        ("content_time", "创建时间"),
+        ("description",  "描述"),
+        ("feeling",      "感受"),
+        ("reason",       "记录原因"),
+    ]:
+        v = str(session.get(key, "")).strip()
+        if v:
+            parts.append(f"{label}：{v}")
+    return "\n".join(parts)
+
+
+def _parse_date_iso(raw: str) -> str:
+    """尝试将 content_time 原始值解析为 YYYY-MM-DD，失败返回空字符串。"""
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d",
+                "%Y-%m",   "%Y/%m",    "%Y"):
+        try:
+            return datetime.strptime(raw.strip(), fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return ""
+
+
+def _build_chroma_metadata(session: dict) -> dict:
+    raw = str(session.get("content_time", "")).strip()
+    iso = _parse_date_iso(raw)
+    return {
+        "session_id":       session["session_id"],
+        "content_time_raw": raw,
+        "content_time_iso": iso,
+        "has_exact_date":   iso != "",
+        "upload_time":      session.get("upload_time", ""),
+        "archive_time":     session.get("archive_time", ""),
+        "source_type":      session.get("source_type", ""),
+    }
+
+
+def embed_session(session: dict) -> None:
+    """将 session 写入向量库（upsert，插入与更新均适用）。"""
+    try:
+        text = _build_embed_text(session)
+        if not text.strip():
+            return
+        embedding = _get_embedder().encode(
+            text, normalize_embeddings=True
+        ).tolist()
+        _get_collection().upsert(
+            ids=[session["session_id"]],
+            embeddings=[embedding],
+            documents=[text],
+            metadatas=[_build_chroma_metadata(session)],
+        )
+    except Exception:
+        pass  # 向量库写入失败不影响主流程
+
+
+def delete_embedding(session_id: str) -> None:
+    try:
+        _get_collection().delete(ids=[session_id])
+    except Exception:
+        pass
+
+
+def index_existing_finals() -> int:
+    """将尚未入库的 Final 记录批量写入向量库，返回新增数量。"""
+    db     = load_db()
+    finals = [s for s in db if s.get("status") == "final"]
+    if not finals:
+        return 0
+    existing = set(_get_collection().get(include=[])["ids"])
+    to_index = [s for s in finals if s["session_id"] not in existing]
+    for s in to_index:
+        embed_session(s)
+    return len(to_index)
+
+
+def _ensure_indexed() -> None:
+    """应用启动时调用，补全历史 Final 记录的向量索引。"""
+    if st.session_state.get("_vector_db_ready"):
+        return
+    db     = load_db()
+    finals = [s for s in db if s.get("status") == "final"]
+    st.session_state["_vector_db_ready"] = True
+    if not finals:
+        return
+    try:
+        with st.spinner("🗄️ 正在初始化向量库…"):
+            count = index_existing_finals()
+        if count > 0:
+            st.toast(f"向量库已补全索引：{count} 条历史归档记录", icon="🗄️")
+    except Exception as e:
+        st.warning(f"向量库初始化失败（搜索功能不可用）：{e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -406,9 +539,9 @@ def render_field_inputs(
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _render_comments(session: dict) -> None:
-    sid           = session["session_id"]
-    comments      = [c for c in session.get("comments", []) if isinstance(c, dict)]
-    input_key     = f"new_cmt_{sid}"
+    sid       = session["session_id"]
+    comments  = [c for c in session.get("comments", []) if isinstance(c, dict)]
+    input_key = f"new_cmt_{sid}"
 
     st.markdown("#### 💬 评论区")
 
@@ -455,6 +588,7 @@ def init_state() -> None:
         "upload_key":        0,
         "pending_selected":  None,
         "archived_selected": None,
+        "search_selected":   None,
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -485,8 +619,11 @@ def render_upload_tab() -> None:
 
     if source_mode == "📁 上传文件":
         files = st.file_uploader(
-            "支持 jpg / png / mp4 / md / txt（可多选，本次上传构成一条记录）",
-            type=["jpg", "jpeg", "png", "mp4", "md", "txt"],
+            "支持图片、各种格式视频、文本（可多选，本次上传构成一条记录）",
+            type=["jpg", "jpeg", "png",
+                  "mp4", "mov", "avi", "mkv", "wmv", "webm",
+                  "flv", "m4v", "3gp", "ts", "mts", "mpg", "mpeg",
+                  "md", "txt"],
             accept_multiple_files=True,
             key=f"uploader_{st.session_state.upload_key}",
         ) or []
@@ -542,7 +679,7 @@ def render_upload_tab() -> None:
             )
 
     if source_mode == "📁 上传文件":
-        file_data = [(f.getvalue(), f.name) for f in files]
+        file_data = [(f, f.name) for f in files]
         src_type  = "file"
     else:
         file_data = [(pasted_text.encode("utf-8"), _pasted_filename(pasted_text))]
@@ -591,7 +728,7 @@ def _session_thumb(session: dict) -> bytes | str | None:
         return None
     if ext in {".jpg", ".jpeg", ".png"}:
         return str(fp)
-    if ext == ".mp4":
+    if ext in VIDEO_EXTS:
         thumb = video_thumbnail(fp)
         return pil_to_png_bytes(thumb) if thumb else None
     return None
@@ -602,7 +739,9 @@ def _completion_badge(session: dict) -> str:
     return "✅ 信息完整" if not missing else f"⚠️ 待补充：{'、'.join(missing)}"
 
 
-def _render_card(col, session: dict, state_key: str) -> None:
+def _render_card(
+    col, session: dict, state_key: str, score: float | None = None
+) -> None:
     sid     = session["session_id"]
     is_sel  = st.session_state.get(state_key) == sid
     thumb   = _session_thumb(session)
@@ -626,6 +765,8 @@ def _render_card(col, session: dict, state_key: str) -> None:
             st.caption(f"📎 共 {n_files} 个文件")
         if n_cmts:
             st.caption(f"💬 {n_cmts} 条评论")
+        if score is not None:
+            st.caption(f"🎯 相似度 {score:.0%}")
         st.caption(f"🕐 {session.get('upload_time', '')}")
         st.caption(_completion_badge(session))
 
@@ -656,7 +797,6 @@ def _render_detail(session: dict, mode: str) -> None:
     elif not missing_now:
         st.success("✅ 所有必填项已完整")
 
-    # 文件预览
     with st.expander(f"查看文件（{len(session.get('files', []))} 个）", expanded=False):
         for fe in session.get("files", []):
             fp  = Path(fe["path"])
@@ -667,8 +807,19 @@ def _render_detail(session: dict, mode: str) -> None:
                 continue
             if ext in {".jpg", ".jpeg", ".png"}:
                 st.image(str(fp), use_container_width=True)
-            elif ext == ".mp4":
-                st.video(fp.read_bytes())
+            elif ext in VIDEO_EXTS_PLAYABLE:
+                st.video(str(fp))
+            elif ext in VIDEO_EXTS:
+                size_mb = fp.stat().st_size / 1024 / 1024
+                st.info(f"🎬 {fe['original_name']}（{size_mb:.1f} MB）\n\n"
+                        "该格式浏览器不支持直接播放，请用本地播放器打开文件。")
+                with open(fp, "rb") as fh:
+                    st.download_button(
+                        "⬇️ 下载文件",
+                        data=fh,
+                        file_name=fe["original_name"],
+                        key=f"dl_{fe['filename']}",
+                    )
             else:
                 try:
                     st.text_area(
@@ -681,7 +832,6 @@ def _render_detail(session: dict, mode: str) -> None:
                 except OSError:
                     st.warning("无法读取文件内容")
 
-    # 编辑历史（仅 Final）
     if mode == "final" and session.get("edit_history"):
         with st.expander(f"编辑历史（{len(session['edit_history'])} 次）"):
             for edit in reversed(session["edit_history"]):
@@ -691,7 +841,6 @@ def _render_detail(session: dict, mode: str) -> None:
                     st.markdown(f"- **{lbl}**：「{change['from']}」→「{change['to']}」")
                 st.divider()
 
-    # 编辑表单
     safe_sid    = "".join(c if c.isalnum() else "_" for c in sid)
     edit_prefix = f"edit_{safe_sid}"
     skip_keys   = {"description"} if is_text else set()
@@ -746,7 +895,6 @@ def _render_detail(session: dict, mode: str) -> None:
             st.session_state[state_key] = None
             st.rerun()
 
-    # 评论区（form 外部，支持实时增删）
     st.divider()
     _render_comments(session)
 
@@ -824,6 +972,175 @@ def render_archived_tab() -> None:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 🔍 搜索 Tab — Phase 2.2 日期过滤 + Phase 2.3 语义检索
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _render_search_results(sessions_scores: list[tuple], state_key: str) -> None:
+    """渲染搜索结果卡片列表，score 为 None 时不显示相似度。"""
+    all_db  = load_db()
+    db_map  = {s["session_id"]: s for s in all_db}
+
+    rows = []
+    for sid, score in sessions_scores:
+        session = db_map.get(sid)
+        if session:
+            rows.append((session, score))
+
+    if not rows:
+        st.info("没有找到匹配的记录。")
+        return
+
+    for row_start in range(0, len(rows), COLS):
+        cols = st.columns(COLS)
+        for col, (session, score) in zip(cols, rows[row_start: row_start + COLS]):
+            _render_card(col, session, state_key, score=score)
+
+    sel = st.session_state.get(state_key)
+    if sel:
+        target = db_map.get(sel)
+        if target:
+            st.divider()
+            _render_detail(target, "final")
+
+
+def _render_date_filter() -> None:
+    """Phase 2.2：日期范围过滤检索。"""
+    c1, c2 = st.columns(2)
+    with c1:
+        start = st.date_input("开始日期", value=None, key="filter_start")
+    with c2:
+        end = st.date_input("结束日期", value=None, key="filter_end")
+
+    if st.button("🔍 查询", type="primary", key="date_filter_btn"):
+        if not start or not end:
+            st.warning("请选择开始和结束日期")
+            return
+        if start > end:
+            st.error("开始日期不能晚于结束日期")
+            return
+
+        start_str = start.strftime("%Y-%m-%d")
+        end_str   = end.strftime("%Y-%m-%d")
+
+        try:
+            col = _get_collection()
+            total = col.count()
+            if total == 0:
+                st.info("向量库暂无数据，请先归档一些记录。")
+                return
+
+            # 精确日期且在范围内
+            exact = col.get(
+                where={"$and": [
+                    {"has_exact_date": {"$eq": True}},
+                    {"content_time_iso": {"$gte": start_str}},
+                    {"content_time_iso": {"$lte": end_str}},
+                ]},
+                include=["metadatas"],
+            )
+            # 模糊时间（无法按日期过滤）
+            fuzzy = col.get(
+                where={"has_exact_date": {"$eq": False}},
+                include=["metadatas"],
+            )
+        except Exception as e:
+            st.error(f"查询失败：{e}")
+            return
+
+        st.divider()
+        exact_ids = exact["ids"]
+        st.markdown(f"### 📅 精确日期匹配（{len(exact_ids)} 条）")
+        if exact_ids:
+            # 按 content_time_iso 排序
+            meta_map = {m["session_id"]: m for m in exact["metadatas"]}
+            sorted_ids = sorted(exact_ids,
+                                key=lambda i: meta_map[i].get("content_time_iso", ""),
+                                reverse=True)
+            _render_search_results([(sid, None) for sid in sorted_ids], "search_selected")
+        else:
+            st.caption(f"该日期范围（{start_str} 至 {end_str}）内无精确日期记录")
+
+        fuzzy_ids = fuzzy["ids"]
+        if fuzzy_ids:
+            st.divider()
+            with st.expander(f"⚠️ 以下 {len(fuzzy_ids)} 条记录使用了模糊时间描述，无法按日期过滤"):
+                _render_search_results([(sid, None) for sid in fuzzy_ids], "search_selected")
+
+
+def _render_semantic_search() -> None:
+    """Phase 2.3：自然语言语义检索。"""
+    query = st.text_input(
+        "描述你想找的内容",
+        placeholder="例如：和朋友一起看日落的那次旅行……",
+        key="semantic_query",
+    )
+    top_k = st.slider("最多返回结果数", min_value=1, max_value=10, value=5,
+                      key="semantic_topk")
+
+    if not st.button("🔍 开始检索", type="primary", key="semantic_btn"):
+        return
+    if not query.strip():
+        st.warning("请输入检索内容")
+        return
+
+    try:
+        col   = _get_collection()
+        total = col.count()
+        if total == 0:
+            st.info("向量库暂无数据，请先归档一些记录。")
+            return
+
+        # BGE 非对称检索：query 加前缀，document 不加
+        query_text = "为这个句子生成表示以用于检索相关文章：" + query.strip()
+        embedding  = _get_embedder().encode(
+            query_text, normalize_embeddings=True
+        ).tolist()
+
+        results = col.query(
+            query_embeddings=[embedding],
+            n_results=min(top_k, total),
+            include=["metadatas", "distances"],
+        )
+    except Exception as e:
+        st.error(f"检索失败：{e}")
+        return
+
+    ids       = results["ids"][0]
+    distances = results["distances"][0]
+
+    if not ids:
+        st.info("没有找到相关记录。")
+        return
+
+    # cosine distance → similarity
+    pairs = [(sid, 1 - dist) for sid, dist in zip(ids, distances)]
+
+    st.divider()
+    st.markdown(f"### 🎯 语义检索结果（Top {len(pairs)}）")
+    _render_search_results(pairs, "search_selected")
+
+
+def render_search_tab() -> None:
+    mode = st.radio(
+        "检索模式",
+        ["📅 日期过滤", "🔍 语义检索", "💬 智能问答（即将上线）"],
+        horizontal=True,
+        key="search_mode",
+    )
+
+    if mode == "💬 智能问答（即将上线）":
+        st.info("智能问答功能正在开发中（Phase 2.4），敬请期待。")
+        return
+
+    st.divider()
+
+    if mode == "📅 日期过滤":
+        _render_date_filter()
+    else:
+        _render_semantic_search()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 入口
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -831,9 +1148,15 @@ def main() -> None:
     st.set_page_config(page_title="灵感记录工具", page_icon="🗂️", layout="wide")
     ensure_dirs()
     init_state()
+    _ensure_indexed()
 
     st.title("🗂️ 灵感记录工具")
-    tab1, tab2, tab3 = st.tabs(["🗂️ 记录舱（上传）", "🖼️ 灵感墙（待处理）", "📚 已归档"])
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🗂️ 记录舱（上传）",
+        "🖼️ 灵感墙（待处理）",
+        "📚 已归档",
+        "🔍 搜索",
+    ])
 
     with tab1:
         render_upload_tab()
@@ -841,6 +1164,8 @@ def main() -> None:
         render_gallery_tab()
     with tab3:
         render_archived_tab()
+    with tab4:
+        render_search_tab()
 
 
 if __name__ == "__main__":

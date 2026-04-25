@@ -4,6 +4,50 @@
 
 ---
 
+## [v2.3.0] - 2026-04-25
+
+### 新增
+
+- **Phase 2.1 — Embedding 基础层**
+  - 引入 ChromaDB（本地持久化，cosine 相似度）+ `BAAI/bge-small-zh-v1.5` 模型
+  - `embed_session()` / `delete_embedding()`：向量库写入与删除
+  - `index_existing_finals()`：启动时自动补全历史归档记录的索引
+  - `_parse_date_iso()`：将 content_time 解析为 YYYY-MM-DD，双轨存储（raw + iso）
+  - Embedding 自动 hook：归档（`save_session_final` / `move_to_final`）和字段更新（`update_session_fields`）时同步写入向量库
+  - `st.cache_resource` 缓存 embedder 和 collection，避免重复加载
+
+- **Phase 2.2 — 日期过滤搜索**
+  - 新增「🔍 搜索」Tab（第四个 Tab）
+  - 日期范围选择 → ChromaDB metadata filter（`has_exact_date=True` + 日期区间）
+  - 模糊时间描述的记录单独折叠展示，并注明无法按日期过滤
+
+- **Phase 2.3 — 语义检索**
+  - 自然语言输入 → BGE 非对称检索（query 加前缀）→ Top-K 结果
+  - 结果卡片附「🎯 相似度 XX%」标签
+  - 点击卡片可展开完整详情和评论区
+
+- `_render_card()` 新增可选 `score` 参数（向后兼容）
+- `search_selected` 加入 session state 管理搜索结果的选中状态
+- `vector_db/` 加入 `.gitignore`
+
+---
+
+## [v2.2.0] - 2026-04-25
+
+### 新增
+
+- **视频格式全面支持**：新增 mov / avi / mkv / wmv / webm / flv / m4v / 3gp / ts / mts / mpg / mpeg
+- **任意大小视频上传**：`server.maxUploadSize` 提升至 4096 MB（4 GB）
+- **流式文件写入**：上传文件直接以流写入磁盘，不再先整体读入内存，大视频不再占用双倍内存
+- **智能视频预览**：浏览器可播放格式（mp4 / webm / mov / m4v）直接内嵌播放；avi / mkv / wmv 等不兼容格式显示文件信息并提供下载按钮
+
+### 变更
+
+- `VIDEO_EXTS` / `VIDEO_EXTS_PLAYABLE` 常量统一管理所有视频格式判断逻辑
+- `_write_files()` 同时支持 bytes 和 file-like 对象
+
+---
+
 ## [v2.1.0] - 2026-04-24
 
 ### 新增
