@@ -1,0 +1,23 @@
+# 用户数据（个人文件和数据库，不纳入版本控制）
+Assets/
+pending_db.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE / 工具
+.claude/
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
