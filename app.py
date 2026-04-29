@@ -420,6 +420,35 @@ def auto_tag_session(session: dict) -> list[str]:
     return []
 
 
+def import_folder_to_pending(file_paths: list[Path], as_one_session: bool) -> int:
+    """将本地文件夹中的文件导入为 pending session。
+    as_one_session=True：所有文件合并为一条记录。
+    返回创建的 session 数量。
+    """
+    if not file_paths:
+        return 0
+    if as_one_session:
+        handles = []
+        file_data = []
+        try:
+            for fp in file_paths:
+                fh = open(fp, "rb")
+                handles.append(fh)
+                file_data.append((fh, fp.name))
+            save_session_pending(file_data, "file", {})
+        finally:
+            for fh in handles:
+                fh.close()
+        return 1
+    else:
+        count = 0
+        for fp in file_paths:
+            with open(fp, "rb") as fh:
+                save_session_pending([(fh, fp.name)], "file", {})
+            count += 1
+        return count
+
+
 def add_comment(session_id: str, text: str) -> None:
     """追加一条评论（含自动时间戳）。"""
     db      = load_db()
@@ -771,6 +800,9 @@ def init_state() -> None:
         "archived_type_filter":  "全部",
         "archived_tag_filter":   [],
         "archived_group_filter": None,   # group_id or None
+        # 文件夹导入
+        "folder_scan_results":   [],     # list[str] 文件绝对路径
+        "folder_import_done":    0,      # 本次导入成功数，非 0 时显示提示
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -786,14 +818,111 @@ def _pasted_filename(text: str) -> str:
     return f"{safe}.txt" if safe else "paste.txt"
 
 
+SUPPORTED_IMPORT_EXTS = IMAGE_EXTS | VIDEO_EXTS | TEXT_EXTS
+
+
+def _render_folder_import() -> None:
+    """📂 导入文件夹：扫描本地路径，选择文件后批量导入为待处理记录。"""
+
+    # ── 导入成功提示 ─────────────────────────────────────────────────────
+    done = st.session_state.get("folder_import_done", 0)
+    if done:
+        st.success(f"✅ 已成功导入 **{done}** 条记录到灵感墙！")
+        st.session_state["folder_import_done"] = 0
+
+    # ── 路径输入 + 扫描 ──────────────────────────────────────────────────
+    folder_str = st.text_input(
+        "文件夹路径",
+        placeholder=r"例：C:\Users\xxx\Pictures  或  /home/xxx/photos",
+        key="folder_path_input",
+    )
+
+    c_scan, c_mode = st.columns([1, 2])
+    with c_scan:
+        do_scan = st.button("🔍 扫描文件夹", type="primary", key="scan_folder_btn")
+    with c_mode:
+        import_mode = st.radio(
+            "导入方式",
+            ["每个文件独立记录", "所有文件合并一条记录"],
+            horizontal=True,
+            key="folder_import_mode",
+        )
+
+    if do_scan:
+        if not folder_str.strip():
+            st.warning("请先输入文件夹路径")
+        else:
+            folder = Path(folder_str.strip())
+            if not folder.exists():
+                st.error("路径不存在，请检查是否填写正确")
+            elif not folder.is_dir():
+                st.error("该路径不是文件夹")
+            else:
+                found = sorted(
+                    [f for f in folder.iterdir()
+                     if f.is_file() and f.suffix.lower() in SUPPORTED_IMPORT_EXTS],
+                    key=lambda p: p.name,
+                )
+                st.session_state["folder_scan_results"] = [str(f) for f in found]
+
+    # ── 显示扫描结果 + 文件选择 ──────────────────────────────────────────
+    scan_results: list[str] = st.session_state.get("folder_scan_results", [])
+    if not scan_results:
+        st.caption("支持格式：图片（jpg/png/gif/webp/bmp）、视频（mp4/mov/avi 等）、文本（txt/md）")
+        return
+
+    st.markdown(f"扫描到 **{len(scan_results)}** 个支持格式的文件，请勾选要导入的内容：")
+
+    # 用 multiselect 代替逐条 checkbox，避免每次勾选都全量 rerun
+    file_names = [Path(p).name for p in scan_results]
+    selected_names = st.multiselect(
+        "选择文件",
+        options=file_names,
+        default=file_names,
+        key="folder_file_select",
+        label_visibility="collapsed",
+    )
+
+    # 按大小展示预估信息
+    selected_paths = [Path(p) for p in scan_results if Path(p).name in selected_names]
+    if selected_paths:
+        total_mb = sum(p.stat().st_size for p in selected_paths if p.exists()) / 1024 / 1024
+        as_one   = import_mode == "所有文件合并一条记录"
+        n_sess   = 1 if as_one else len(selected_paths)
+        st.caption(f"已选 **{len(selected_paths)}** 个文件，共约 {total_mb:.1f} MB → 将创建 **{n_sess}** 条待处理记录")
+
+        if st.button("📥 导入到灵感墙", type="primary", key="do_import_btn"):
+            with st.spinner(f"正在导入 {len(selected_paths)} 个文件…"):
+                count = import_folder_to_pending(selected_paths, as_one_session=as_one)
+            st.session_state["folder_scan_results"] = []
+            st.session_state["folder_import_done"]  = count
+            st.rerun()
+    else:
+        st.info("请至少选择一个文件")
+
+    if st.button("清除扫描结果", key="clear_scan_btn"):
+        st.session_state["folder_scan_results"] = []
+        st.rerun()
+
+
 def render_upload_tab() -> None:
     source_mode = st.radio(
         "上传方式",
-        ["📁 上传文件", "📝 粘贴文字"],
+        ["📁 上传文件", "📝 粘贴文字", "📂 导入文件夹"],
         horizontal=True,
         key="source_mode",
     )
 
+    # ══════════════════════════════════════════════════════════════════════
+    # 📂 导入文件夹模式 — 独立逻辑，提前返回
+    # ══════════════════════════════════════════════════════════════════════
+    if source_mode == "📂 导入文件夹":
+        _render_folder_import()
+        return
+
+    # ══════════════════════════════════════════════════════════════════════
+    # 📁 上传文件 / 📝 粘贴文字 模式
+    # ══════════════════════════════════════════════════════════════════════
     files: list      = []
     pasted_text      = ""
     is_text_content  = False
@@ -1060,14 +1189,35 @@ def _render_detail(
     edit_prefix = f"edit_{safe_sid}"
     skip_keys   = {"description"} if is_text else set()
 
-    if is_text:
-        st.info("📝 纯文字记录：描述由内容自动填充，不可手动修改")
+    # ── 读取纯文字记录的实际文件内容（form 外，供写回使用）──────────────
+    text_file_path    = None
+    current_text_body = ""
+    if is_text and session.get("files"):
+        text_file_path = Path(session["files"][0]["path"])
+        try:
+            current_text_body = text_file_path.read_text(encoding="utf-8")
+        except OSError:
+            current_text_body = str(session.get("description", ""))
 
     with st.form(f"form_{safe_sid}"):
         st.markdown("#### ✏️ 编辑字段")
+
+        # 纯文字记录：在 form 内展示可编辑正文
+        if is_text:
+            st.markdown("**📝 文本内容**（可直接编辑，保存后同步写入文件）")
+            text_body = st.text_area(
+                "文本内容",
+                value=current_text_body,
+                height=300,
+                key=f"text_body_{safe_sid}",
+                label_visibility="collapsed",
+            )
+        else:
+            text_body = ""
+
         field_values = render_field_inputs(edit_prefix, defaults=session, skip_keys=skip_keys)
         if is_text:
-            field_values["description"] = str(session.get("description", ""))
+            field_values["description"] = text_body
 
         # ── 标签（不计入 edit_history）────────────────────────────────
         st.divider()
@@ -1127,6 +1277,11 @@ def _render_detail(
         st.rerun()
 
     if do_save:
+        if is_text and text_file_path:
+            try:
+                text_file_path.write_text(text_body, encoding="utf-8")
+            except OSError as e:
+                st.error(f"文件写入失败：{e}")
         field_values["tags"]      = selected_tags
         field_values["group_ids"] = selected_gids
         update_session_fields(sid, field_values)
@@ -1139,6 +1294,12 @@ def _render_detail(
         if missing:
             st.error(f"❌ 以下必填项仍未填写：**{'、'.join(missing)}**，请补充后再归档。")
         else:
+            if is_text and text_file_path:
+                try:
+                    text_file_path.write_text(text_body, encoding="utf-8")
+                except OSError as e:
+                    st.error(f"文件写入失败：{e}")
+                    st.stop()
             field_values["tags"]      = selected_tags
             field_values["group_ids"] = selected_gids
             update_session_fields(sid, field_values)
