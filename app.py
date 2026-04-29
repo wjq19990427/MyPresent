@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,8 @@ FINAL_DIR     = ASSETS_DIR / "Final"
 PENDING_DIR   = ASSETS_DIR / "Pending"
 DB_FILE       = Path("pending_db.json")
 VECTOR_DB_DIR = Path(__file__).parent / "vector_db"
+CONFIG_FILE   = Path("mypresent_config.json")
+DEFAULT_TAGS  = ["个人规划", "生活感悟", "重要记忆", "工作总结", "随笔"]
 COLS          = 3
 TEXT_EXTS     = {".txt", ".md"}
 IMAGE_EXTS    = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
@@ -33,6 +36,84 @@ def _file_subdir(filename: str) -> str:
     if ext in IMAGE_EXTS:  return "images"
     if ext in VIDEO_EXTS:  return "videos"
     return "text"
+
+
+def _session_file_type(session: dict) -> str:
+    """返回 session 主文件的类型，用于文件类型筛选。"""
+    files = session.get("files", [])
+    if not files:
+        return "text"
+    return _file_subdir(files[0]["filename"])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 配置层 — 标签注册表 + 分组
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def load_config() -> dict:
+    if CONFIG_FILE.exists():
+        try:
+            return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"tags_registry": DEFAULT_TAGS.copy(), "groups": []}
+
+
+def save_config(config: dict) -> None:
+    CONFIG_FILE.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def get_tags_registry() -> list[str]:
+    return load_config().get("tags_registry", DEFAULT_TAGS[:])
+
+
+def add_tag(tag: str) -> None:
+    tag = tag.strip()
+    if not tag:
+        return
+    cfg = load_config()
+    if tag not in cfg.get("tags_registry", []):
+        cfg.setdefault("tags_registry", []).append(tag)
+        save_config(cfg)
+
+
+def remove_tag(tag: str) -> None:
+    cfg = load_config()
+    cfg["tags_registry"] = [t for t in cfg.get("tags_registry", []) if t != tag]
+    save_config(cfg)
+
+
+def get_groups() -> list[dict]:
+    return load_config().get("groups", [])
+
+
+def create_group(name: str) -> str:
+    name = name.strip()
+    if not name:
+        return ""
+    group_id = f"grp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    cfg = load_config()
+    cfg.setdefault("groups", []).append({
+        "id":         group_id,
+        "name":       name,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    save_config(cfg)
+    return group_id
+
+
+def delete_group(group_id: str) -> None:
+    cfg = load_config()
+    cfg["groups"] = [g for g in cfg.get("groups", []) if g["id"] != group_id]
+    save_config(cfg)
+    db = load_db()
+    changed = False
+    for s in db:
+        if group_id in s.get("group_ids", []):
+            s["group_ids"] = [g for g in s["group_ids"] if g != group_id]
+            changed = True
+    if changed:
+        save_db(db)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -132,6 +213,7 @@ def _make_session(
     file_entries: list[dict],
     source_type: str,
     field_values: dict,
+    tags: list[str] | None = None,
 ) -> dict:
     session = {
         "session_id":   session_id,
@@ -142,6 +224,8 @@ def _make_session(
         "archive_time": "",
         "edit_history": [],
         "comments":     [],
+        "tags":         tags or [],
+        "group_ids":    [],
     }
     _apply_fields(session, field_values)
     return session
@@ -211,22 +295,24 @@ def _write_md(session: dict) -> None:
 
 
 def save_session_pending(
-    file_data_list: list[tuple], source_type: str, field_values: dict
+    file_data_list: list[tuple], source_type: str, field_values: dict,
+    tags: list[str] | None = None,
 ) -> None:
     sid          = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_entries = _write_files(file_data_list, PENDING_DIR, sid)
-    session      = _make_session(sid, file_entries, source_type, field_values)
+    session      = _make_session(sid, file_entries, source_type, field_values, tags=tags)
     db = load_db()
     db.append(session)
     save_db(db)
 
 
 def save_session_final(
-    file_data_list: list[tuple], source_type: str, field_values: dict
+    file_data_list: list[tuple], source_type: str, field_values: dict,
+    tags: list[str] | None = None,
 ) -> None:
     sid          = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_entries = _write_files(file_data_list, FINAL_DIR, sid)
-    session      = _make_session(sid, file_entries, source_type, field_values)
+    session      = _make_session(sid, file_entries, source_type, field_values, tags=tags)
     session["status"]       = "final"
     session["archive_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     session["is_complete"]  = True
@@ -259,11 +345,17 @@ def move_to_final(session_id: str) -> None:
 
 
 def update_session_fields(session_id: str, new_values: dict) -> None:
-    """更新字段；Final 记录额外追加 edit_history 并重写 .md。"""
+    """更新字段；Final 记录额外追加 edit_history 并重写 .md。
+    new_values 可包含 'tags' 和 'group_ids'，这两项不计入 edit_history。
+    """
     db      = load_db()
     session = next((s for s in db if s["session_id"] == session_id), None)
     if not session:
         return
+
+    # tags / group_ids 单独处理，不进 edit_history
+    new_tags   = new_values.get("tags")
+    new_groups = new_values.get("group_ids")
 
     if session.get("status") == "final":
         is_text = _is_text_session(session)
@@ -283,11 +375,49 @@ def update_session_fields(session_id: str, new_values: dict) -> None:
             })
 
     _apply_fields(session, new_values)
+
+    if new_tags is not None:
+        session["tags"] = new_tags
+    if new_groups is not None:
+        session["group_ids"] = new_groups
+
     save_db(db)
 
     if session.get("status") == "final":
         _write_md(session)
         embed_session(session)
+
+
+def update_session_tags(session_id: str, tags: list[str]) -> None:
+    """单独更新标签（不触发 edit_history 或 .md 重写）。"""
+    db      = load_db()
+    session = next((s for s in db if s["session_id"] == session_id), None)
+    if not session:
+        return
+    session["tags"] = tags
+    save_db(db)
+    if session.get("status") == "final":
+        embed_session(session)
+
+
+def update_session_groups(session_id: str, group_ids: list[str]) -> None:
+    """单独更新所属分组。"""
+    db      = load_db()
+    session = next((s for s in db if s["session_id"] == session_id), None)
+    if not session:
+        return
+    session["group_ids"] = group_ids
+    save_db(db)
+
+
+def auto_tag_session(session: dict) -> list[str]:
+    """预留接口：调用外部 API 为 session 推荐标签，返回标签名列表。
+    当前为 stub；配置 MYPRESENT_API_KEY 环境变量后 Phase 3 实现。
+    """
+    if not os.environ.get("MYPRESENT_API_KEY"):
+        return []
+    # TODO Phase 3：调用 Claude/OpenAI API，基于 description/feeling 推荐标签
+    return []
 
 
 def add_comment(session_id: str, text: str) -> None:
@@ -354,6 +484,9 @@ def _build_embed_text(session: dict) -> str:
         v = str(session.get(key, "")).strip()
         if v:
             parts.append(f"{label}：{v}")
+    tags = session.get("tags", [])
+    if tags:
+        parts.append(f"标签：{'、'.join(tags)}")
     return "\n".join(parts)
 
 
@@ -623,17 +756,21 @@ def _render_comments(session: dict) -> None:
 
 def init_state() -> None:
     for k, v in {
-        "upload_key":          0,
-        "pending_selected":    None,
-        "archived_selected":   None,
-        "search_selected":     None,
+        "upload_key":            0,
+        "pending_selected":      None,
+        "archived_selected":     None,
+        "search_selected":       None,
         # 搜索结果持久化（rerun 后仍可展示详情）
-        "semantic_results":    None,   # list[(sid, score)] | None
-        "semantic_query_used": "",
-        "date_filter_exact":   None,   # list[(sid, meta)] | None
-        "date_filter_fuzzy":   None,   # list[sid] | None
-        "date_filter_range":   ("", ""),
-        "_search_mode_prev":   None,
+        "semantic_results":      None,   # list[(sid, score)] | None
+        "semantic_query_used":   "",
+        "date_filter_exact":     None,   # list[(sid, meta)] | None
+        "date_filter_fuzzy":     None,   # list[sid] | None
+        "date_filter_range":     ("", ""),
+        "_search_mode_prev":     None,
+        # 已归档 Tab 过滤状态
+        "archived_type_filter":  "全部",
+        "archived_tag_filter":   [],
+        "archived_group_filter": None,   # group_id or None
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
@@ -705,6 +842,31 @@ def render_upload_tab() -> None:
 
     skip = {"description"} if is_text_content else set()
 
+    # ── 标签选取（在 form 外，便于 AI 推荐按钮单独触发） ───────────────────
+    st.divider()
+    st.markdown("**🏷️ 标签**（选填，可多选）")
+    tag_col, ai_col = st.columns([5, 1])
+    with tag_col:
+        upload_tags = st.multiselect(
+            "标签",
+            options=get_tags_registry(),
+            key=f"upload_tags_{st.session_state.upload_key}",
+            label_visibility="collapsed",
+            placeholder="选择一个或多个标签（选填）",
+        )
+    with ai_col:
+        api_ready = bool(os.environ.get("MYPRESENT_API_KEY"))
+        if st.button(
+            "✨ AI",
+            key="upload_ai_tag_btn",
+            disabled=not api_ready,
+            help="配置 MYPRESENT_API_KEY 后可自动推荐标签",
+        ):
+            suggestions = auto_tag_session({"description": auto_description})
+            if suggestions:
+                st.session_state[f"upload_tags_{st.session_state.upload_key}"] = suggestions
+                st.rerun()
+
     with st.form("upload_meta_form"):
         st.markdown("### 📋 填写记录信息")
         if is_text_content:
@@ -740,12 +902,12 @@ def render_upload_tab() -> None:
                 "请补充后归档，或点「暂存到待处理」先保存。"
             )
         else:
-            save_session_final(file_data, src_type, field_values)
+            save_session_final(file_data, src_type, field_values, tags=upload_tags)
             st.session_state.upload_key += 1
             st.rerun()
 
     if do_pending:
-        save_session_pending(file_data, src_type, field_values)
+        save_session_pending(file_data, src_type, field_values, tags=upload_tags)
         missing = validate_session(
             {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
         )
@@ -814,6 +976,9 @@ def _render_card(
             st.caption(f"🎯 相似度 {score:.0%}")
         st.caption(f"🕐 {session.get('upload_time', '')}")
         st.caption(_completion_badge(session))
+        tags = session.get("tags", [])
+        if tags:
+            st.caption("🏷️ " + "  ".join(tags))
 
         label = "✅ 已选" if is_sel else "🔍 查看 / 编辑"
         if st.button(label, key=f"{state_key}_btn_{sid}", use_container_width=True):
@@ -903,6 +1068,38 @@ def _render_detail(
         field_values = render_field_inputs(edit_prefix, defaults=session, skip_keys=skip_keys)
         if is_text:
             field_values["description"] = str(session.get("description", ""))
+
+        # ── 标签（不计入 edit_history）────────────────────────────────
+        st.divider()
+        st.markdown("**🏷️ 标签**（可多选，不计入编辑历史）")
+        all_tags     = get_tags_registry()
+        extra_tags   = [t for t in session.get("tags", []) if t not in all_tags]
+        tag_options  = all_tags + extra_tags
+        selected_tags = st.multiselect(
+            "标签",
+            options=tag_options,
+            default=[t for t in session.get("tags", []) if t in tag_options],
+            key=f"tags_{safe_sid}",
+            label_visibility="collapsed",
+        )
+
+        # ── 所属分组────────────────────────────────────────────────────
+        groups = get_groups()
+        if groups:
+            st.markdown("**📁 所属分组**")
+            group_map     = {g["id"]: g["name"] for g in groups}
+            current_gids  = [gid for gid in session.get("group_ids", []) if gid in group_map]
+            selected_gids = st.multiselect(
+                "分组",
+                options=list(group_map.keys()),
+                default=current_gids,
+                format_func=lambda gid: group_map.get(gid, gid),
+                key=f"groups_{safe_sid}",
+                label_visibility="collapsed",
+            )
+        else:
+            selected_gids = session.get("group_ids", [])
+
         st.divider()
 
         if mode == "pending":
@@ -930,6 +1127,8 @@ def _render_detail(
         st.rerun()
 
     if do_save:
+        field_values["tags"]      = selected_tags
+        field_values["group_ids"] = selected_gids
         update_session_fields(sid, field_values)
         st.session_state[state_key] = sid
         st.rerun()
@@ -940,6 +1139,8 @@ def _render_detail(
         if missing:
             st.error(f"❌ 以下必填项仍未填写：**{'、'.join(missing)}**，请补充后再归档。")
         else:
+            field_values["tags"]      = selected_tags
+            field_values["group_ids"] = selected_gids
             update_session_fields(sid, field_values)
             move_to_final(sid)
             st.session_state[state_key] = None
@@ -990,27 +1191,153 @@ def render_gallery_tab() -> None:
 # 📚 已归档 Tab（Final）
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def _render_tag_manager() -> None:
+    """标签增删管理面板（用于 expander 内）。"""
+    tags = get_tags_registry()
+    for tag in tags:
+        c_name, c_del = st.columns([5, 1])
+        with c_name:
+            st.markdown(f"🏷️ {tag}")
+        with c_del:
+            if tag in DEFAULT_TAGS:
+                st.caption("默认")
+            elif st.button("🗑️", key=f"del_tag_{tag}", help=f"删除「{tag}」"):
+                remove_tag(tag)
+                st.rerun()
+    st.divider()
+    new_tag = st.text_input("新标签名", key="new_tag_input", placeholder="输入后点添加")
+    if st.button("➕ 添加标签", key="add_tag_btn"):
+        if new_tag.strip():
+            add_tag(new_tag)
+            if "new_tag_input" in st.session_state:
+                del st.session_state["new_tag_input"]
+            st.rerun()
+        else:
+            st.warning("标签名不能为空")
+
+
+def _render_group_manager() -> None:
+    """分组增删管理面板（用于 expander 内）。"""
+    groups = get_groups()
+    if groups:
+        for g in groups:
+            c_name, c_del = st.columns([5, 1])
+            with c_name:
+                st.markdown(f"📁 **{g['name']}**")
+                st.caption(g.get("created_at", ""))
+            with c_del:
+                if st.button("🗑️", key=f"del_grp_{g['id']}", help=f"删除「{g['name']}」"):
+                    delete_group(g["id"])
+                    if st.session_state.get("archived_group_filter") == g["id"]:
+                        st.session_state["archived_group_filter"] = None
+                    st.rerun()
+        st.divider()
+    else:
+        st.caption("暂无分组")
+        st.divider()
+    new_grp = st.text_input("新分组名", key="new_group_input", placeholder="输入后点创建")
+    if st.button("➕ 创建分组", key="create_group_btn"):
+        if new_grp.strip():
+            create_group(new_grp)
+            if "new_group_input" in st.session_state:
+                del st.session_state["new_group_input"]
+            st.rerun()
+        else:
+            st.warning("分组名不能为空")
+
+
 def render_archived_tab() -> None:
-    all_db = load_db()
-    db = sorted(
+    all_db     = load_db()
+    all_finals = sorted(
         [s for s in all_db if s.get("status") == "final"],
         key=lambda s: s.get("upload_time", ""),
         reverse=True,
     )
 
-    if not db:
+    if not all_finals:
         st.info("暂无已归档记录。在「灵感墙」补全后归档，或在「记录舱」直接完成归档。")
         return
 
-    st.caption(f"共 **{len(db)}** 条已归档记录")
+    # ── 分组导航 ────────────────────────────────────────────────────────────
+    groups    = get_groups()
+    group_map = {g["id"]: g["name"] for g in groups}
+    if groups:
+        st.markdown("**📁 分组**")
+        btn_labels = ["全部"] + [g["name"] for g in groups]
+        btn_ids    = [None]   + [g["id"]   for g in groups]
+        gf_current = st.session_state.get("archived_group_filter")
+        grp_cols   = st.columns(min(len(btn_labels), 8))
+        for i, (label, gid) in enumerate(zip(btn_labels, btn_ids)):
+            with grp_cols[i]:
+                is_active = (gf_current == gid)
+                btn_type  = "primary" if is_active else "secondary"
+                if st.button(label, key=f"grp_btn_{i}", type=btn_type,
+                             use_container_width=True):
+                    st.session_state["archived_group_filter"] = None if is_active else gid
+                    st.session_state["archived_selected"] = None
+                    st.rerun()
+
+    # ── 文件类型 + 标签过滤 ─────────────────────────────────────────────────
+    fc1, fc2 = st.columns([2, 3])
+    with fc1:
+        type_filter = st.radio(
+            "文件类型",
+            ["全部", "📷 图片", "🎬 视频", "📝 文本"],
+            horizontal=True,
+            key="archived_type_filter",
+        )
+    with fc2:
+        tag_filter = st.multiselect(
+            "标签筛选（OR 逻辑）",
+            options=get_tags_registry(),
+            key="archived_tag_filter",
+            placeholder="选择标签过滤，多选取并集",
+        )
+
+    # ── 管理工具 ────────────────────────────────────────────────────────────
+    m1, m2 = st.columns(2)
+    with m1:
+        with st.expander("⚙️ 管理标签"):
+            _render_tag_manager()
+    with m2:
+        with st.expander("⚙️ 管理分组"):
+            _render_group_manager()
+
+    # ── 过滤 ────────────────────────────────────────────────────────────────
+    db = all_finals
+
+    gf = st.session_state.get("archived_group_filter")
+    if gf:
+        db = [s for s in db if gf in s.get("group_ids", [])]
+
+    type_map = {"📷 图片": "images", "🎬 视频": "videos", "📝 文本": "text"}
+    if type_filter != "全部":
+        db = [s for s in db if _session_file_type(s) == type_map.get(type_filter, "")]
+
+    if tag_filter:
+        db = [s for s in db if any(t in s.get("tags", []) for t in tag_filter)]
+
+    # 若已选记录被过滤掉，清空选中
+    sel = st.session_state.get("archived_selected")
+    if sel and sel not in {s["session_id"] for s in db}:
+        st.session_state["archived_selected"] = None
+        sel = None
+
     st.divider()
+    total_label = f"共 **{len(all_finals)}** 条已归档"
+    if len(db) != len(all_finals):
+        total_label += f"，当前筛选显示 **{len(db)}** 条"
+    st.caption(total_label)
+
+    if not db:
+        st.info("当前筛选条件下没有记录。")
+        return
 
     for row_start in range(0, len(db), COLS):
         cols = st.columns(COLS)
         for col, session in zip(cols, db[row_start: row_start + COLS]):
             _render_card(col, session, "archived_selected")
 
-    sel = st.session_state.archived_selected
     if not sel:
         return
     target = next((s for s in all_db if s["session_id"] == sel), None)

@@ -2,6 +2,7 @@
 Assets/
 pending_db.json
 vector_db/
+mypresent_config.json
 
 # Python
 __pycache__/
