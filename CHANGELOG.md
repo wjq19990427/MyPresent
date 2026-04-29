@@ -4,6 +4,37 @@
 
 ---
 
+## [v3.0.0] - 2026-04-25
+
+### 重构
+
+- **模块化拆分**：将 ~1750 行的 `app.py` 拆分为职责明确的 Python 包 `mypresent/`
+- `app.py` 精简为 < 35 行的启动入口，仅含 `main()`
+- 包结构如下（无循环依赖）：
+  - `mypresent/constants.py` — 全部常量 + FIELD_SCHEMA（零内部依赖）
+  - `mypresent/config.py` — 标签 / 分组 CRUD
+  - `mypresent/db.py` — pending_db.json I/O + session 数据模型
+  - `mypresent/media.py` — 视频缩略图、图像格式转换
+  - `mypresent/file_io.py` — 文件写入 / 移动 / Markdown 导出
+  - `mypresent/vector_db.py` — ChromaDB + BGE embedding
+  - `mypresent/session_ops.py` — 字段更新、评论、auto_tag
+  - `mypresent/state.py` — Streamlit session state 初始化
+  - `mypresent/ui/forms.py` — 表单字段渲染
+  - `mypresent/ui/components.py` — 共用卡片、详情、评论区、管理面板
+  - `mypresent/ui/tab_upload.py` — 记录舱 Tab
+  - `mypresent/ui/tab_gallery.py` — 灵感墙 Tab
+  - `mypresent/ui/tab_archived.py` — 已归档 Tab
+  - `mypresent/ui/tab_search.py` — 搜索 Tab
+- `README.md` 重写为开发者文档（架构说明 / 扩展指南 / API 参考）
+- 新增 `requirements.txt` 显式锁定依赖
+
+### 兼容性
+
+- 数据文件（`pending_db.json`、`Assets/`、`vector_db/`、`mypresent_config.json`）格式不变，无需迁移
+- 运行命令不变：`streamlit run app.py`
+
+---
+
 ## [v2.6.0] - 2026-04-30
 
 ### 新增
