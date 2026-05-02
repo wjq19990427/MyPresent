@@ -22,6 +22,22 @@ def render_archived_tab() -> None:
         st.info("暂无已归档记录。在「灵感墙」补全后归档，或在「记录舱」直接完成归档。")
         return
 
+    # ── 无标签提醒 ──────────────────────────────────────────────────────────
+    no_tag_count = sum(1 for s in all_finals if not s.get("tags"))
+    if no_tag_count:
+        with st.container():
+            c_warn, c_btn = st.columns([5, 2])
+            with c_warn:
+                st.warning(
+                    f"🏷️ 有 **{no_tag_count}** 条归档记录尚未添加标签，"
+                    "建议补全以便分类检索。"
+                )
+            with c_btn:
+                if st.button("🔍 只看无标签记录", key="filter_no_tag_btn"):
+                    st.session_state["archived_tag_filter"] = []
+                    st.session_state["_show_no_tag_only"] = True
+                    st.rerun()
+
     # ── 分组导航 ────────────────────────────────────────────────────────────
     groups    = get_groups()
     group_map = {g["id"]: g["name"] for g in groups}
@@ -80,6 +96,14 @@ def render_archived_tab() -> None:
 
     if tag_filter:
         db = [s for s in db if any(t in s.get("tags", []) for t in tag_filter)]
+
+    # 无标签专项过滤（点击「只看无标签记录」按钮后激活）
+    if st.session_state.get("_show_no_tag_only"):
+        db = [s for s in db if not s.get("tags")]
+        st.info("📋 当前仅显示**无标签**记录，请逐一进入编辑添加标签。")
+        if st.button("取消无标签筛选", key="cancel_no_tag_filter"):
+            st.session_state["_show_no_tag_only"] = False
+            st.rerun()
 
     sel = st.session_state.get("archived_selected")
     if sel and sel not in {s["session_id"] for s in db}:

@@ -154,7 +154,9 @@ def move_to_final(session_id: str) -> None:
     embed_session(session)
 
 
-def import_folder_to_pending(file_paths: list[Path], as_one_session: bool) -> int:
+def import_folder_to_pending(
+    file_paths: list[Path], as_one_session: bool, tags: list[str] | None = None
+) -> int:
     """将本地文件夹中的文件导入为 pending session，返回创建的 session 数量。"""
     if not file_paths:
         return 0
@@ -166,7 +168,7 @@ def import_folder_to_pending(file_paths: list[Path], as_one_session: bool) -> in
                 fh = open(fp, "rb")
                 handles.append(fh)
                 file_data.append((fh, fp.name))
-            save_session_pending(file_data, "file", {})
+            save_session_pending(file_data, "file", {}, tags=tags)
         finally:
             for fh in handles:
                 fh.close()
@@ -175,6 +177,6 @@ def import_folder_to_pending(file_paths: list[Path], as_one_session: bool) -> in
         count = 0
         for fp in file_paths:
             with open(fp, "rb") as fh:
-                save_session_pending([(fh, fp.name)], "file", {})
+                save_session_pending([(fh, fp.name)], "file", {}, tags=tags)
             count += 1
         return count

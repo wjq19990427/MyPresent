@@ -21,6 +21,7 @@ def init_state() -> None:
         "archived_group_filter": None,
         "folder_scan_results":   [],
         "folder_import_done":    0,
+        "_show_no_tag_only":     False,
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v

@@ -77,6 +77,16 @@ def _render_folder_import() -> None:
         label_visibility="collapsed",
     )
 
+    # ── 标签（必填）────────────────────────────────────────────────────────
+    st.markdown("**🏷️ 标签** **\\*（必填）**")
+    folder_tags = st.multiselect(
+        "标签",
+        options=get_tags_registry(),
+        key="folder_import_tags",
+        label_visibility="collapsed",
+        placeholder="至少选择一个标签",
+    )
+
     selected_paths = [Path(p) for p in scan_results if Path(p).name in selected_names]
     if selected_paths:
         total_mb = sum(p.stat().st_size for p in selected_paths if p.exists()) / 1024 / 1024
@@ -85,11 +95,14 @@ def _render_folder_import() -> None:
         st.caption(f"已选 **{len(selected_paths)}** 个文件，共约 {total_mb:.1f} MB → 将创建 **{n_sess}** 条待处理记录")
 
         if st.button("📥 导入到灵感墙", type="primary", key="do_import_btn"):
-            with st.spinner(f"正在导入 {len(selected_paths)} 个文件…"):
-                count = import_folder_to_pending(selected_paths, as_one_session=as_one)
-            st.session_state["folder_scan_results"] = []
-            st.session_state["folder_import_done"]  = count
-            st.rerun()
+            if not folder_tags:
+                st.error("❌ 请至少选择一个标签后再导入")
+            else:
+                with st.spinner(f"正在导入 {len(selected_paths)} 个文件…"):
+                    count = import_folder_to_pending(selected_paths, as_one_session=as_one, tags=folder_tags)
+                st.session_state["folder_scan_results"] = []
+                st.session_state["folder_import_done"]  = count
+                st.rerun()
     else:
         st.info("请至少选择一个文件")
 
@@ -159,7 +172,7 @@ def render_upload_tab() -> None:
     skip = {"description"} if is_text_content else set()
 
     st.divider()
-    st.markdown("**🏷️ 标签**（选填，可多选）")
+    st.markdown("**🏷️ 标签** **\\*（必填）**")
     tag_col, ai_col = st.columns([5, 1])
     with tag_col:
         upload_tags = st.multiselect(
@@ -167,7 +180,7 @@ def render_upload_tab() -> None:
             options=get_tags_registry(),
             key=f"upload_tags_{st.session_state.upload_key}",
             label_visibility="collapsed",
-            placeholder="选择一个或多个标签（选填）",
+            placeholder="至少选择一个标签",
         )
     with ai_col:
         api_ready = bool(os.environ.get("MYPRESENT_API_KEY"))
@@ -208,30 +221,36 @@ def render_upload_tab() -> None:
         src_type  = "text"
 
     if do_archive:
-        missing = validate_session(
-            {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
-        )
-        if missing:
-            st.error(
-                f"❌ 以下必填项未填写：**{'、'.join(missing)}**\n\n"
-                "请补充后归档，或点「暂存到待处理」先保存。"
-            )
+        if not upload_tags:
+            st.error("❌ 请至少选择一个**标签**后再归档。")
         else:
-            save_session_final(file_data, src_type, field_values, tags=upload_tags)
-            st.session_state.upload_key += 1
-            st.rerun()
+            missing = validate_session(
+                {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
+            )
+            if missing:
+                st.error(
+                    f"❌ 以下必填项未填写：**{'、'.join(missing)}**\n\n"
+                    "请补充后归档，或点「暂存到待处理」先保存。"
+                )
+            else:
+                save_session_final(file_data, src_type, field_values, tags=upload_tags)
+                st.session_state.upload_key += 1
+                st.rerun()
 
     if do_pending:
-        save_session_pending(file_data, src_type, field_values, tags=upload_tags)
-        missing = validate_session(
-            {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
-        )
-        if missing:
-            st.warning(
-                f"📦 已暂存！缺少必填项：**{'、'.join(missing)}**\n\n"
-                "请到「灵感墙」补充完整后再归档。"
-            )
+        if not upload_tags:
+            st.error("❌ 请至少选择一个**标签**后再保存。")
         else:
-            st.success("📦 已暂存！信息完整，也可在「灵感墙」直接归档。")
-        st.session_state.upload_key += 1
-        st.rerun()
+            save_session_pending(file_data, src_type, field_values, tags=upload_tags)
+            missing = validate_session(
+                {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
+            )
+            if missing:
+                st.warning(
+                    f"📦 已暂存！缺少必填项：**{'、'.join(missing)}**\n\n"
+                    "请到「灵感墙」补充完整后再归档。"
+                )
+            else:
+                st.success("📦 已暂存！信息完整，也可在「灵感墙」直接归档。")
+            st.session_state.upload_key += 1
+            st.rerun()
