@@ -102,6 +102,18 @@ def remove_llm_model(model_id: str) -> None:
     save_config(cfg)
 
 
+def update_llm_model(model_id: str, **kwargs) -> None:
+    """更新 Model 字段（name / display_name）。"""
+    cfg = load_config()
+    for m in cfg.get("llm_models", []):
+        if m["id"] == model_id:
+            for k, v in kwargs.items():
+                if k in ("name", "display_name") and v is not None:
+                    m[k] = str(v).strip() or m[k]
+            break
+    save_config(cfg)
+
+
 # ─── 调用入口 ─────────────────────────────────────────────────────────────────
 
 def call_llm(messages: list[dict], model_id: str) -> str:

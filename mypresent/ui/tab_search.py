@@ -8,8 +8,8 @@ from ..db import load_db
 from ..vector_db import _get_collection, _get_embedder
 from ..llm import (
     get_llm_providers, get_llm_models,
-    add_llm_provider, remove_llm_provider,
-    add_llm_model, remove_llm_model,
+    add_llm_provider, remove_llm_provider, update_llm_provider,
+    add_llm_model, remove_llm_model, update_llm_model,
     call_llm,
 )
 from .components import _render_card, _render_detail
@@ -184,7 +184,7 @@ def _render_semantic_search() -> None:
 # ─── LLM 配置管理面板 ────────────────────────────────────────────────────────
 
 def _render_llm_settings() -> None:
-    """Provider + Model 增删管理，放在 expander 内。"""
+    """Provider + Model 增删改管理，放在 expander 内。"""
     providers = get_llm_providers()
     models    = get_llm_models()
     pvd_map   = {p["id"]: p["name"] for p in providers}
@@ -193,14 +193,47 @@ def _render_llm_settings() -> None:
     st.markdown("**🔌 API Provider**")
     if providers:
         for p in providers:
-            c1, c2 = st.columns([6, 1])
-            with c1:
-                st.markdown(f"`{p['name']}`　`{p['base_url']}`　`{p['framework']}`")
-                st.caption(f"Key: {p['api_key'][:8]}…{p['api_key'][-4:]}")
-            with c2:
-                if st.button("🗑️", key=f"del_pvd_{p['id']}", help="删除此 Provider"):
-                    remove_llm_provider(p["id"])
-                    st.rerun()
+            editing = st.session_state.get("_editing_pvd") == p["id"]
+            if editing:
+                with st.container(border=True):
+                    ep_name = st.text_input("名称", value=p["name"],
+                                            key=f"ep_name_{p['id']}")
+                    ep_url  = st.text_input("Base URL", value=p["base_url"],
+                                            key=f"ep_url_{p['id']}")
+                    ep_key  = st.text_input("API Key", value=p["api_key"],
+                                            key=f"ep_key_{p['id']}", type="password")
+                    ep_fw   = st.selectbox("框架", ["openai"], key=f"ep_fw_{p['id']}")
+                    sa, sb, sc = st.columns(3)
+                    with sa:
+                        if st.button("💾 保存", key=f"save_pvd_{p['id']}", type="primary"):
+                            update_llm_provider(p["id"], name=ep_name,
+                                                base_url=ep_url, api_key=ep_key,
+                                                framework=ep_fw)
+                            st.session_state["_editing_pvd"] = None
+                            st.rerun()
+                    with sb:
+                        if st.button("取消", key=f"cancel_pvd_{p['id']}"):
+                            st.session_state["_editing_pvd"] = None
+                            st.rerun()
+                    with sc:
+                        if st.button("🗑️ 删除", key=f"del_pvd_{p['id']}"):
+                            remove_llm_provider(p["id"])
+                            st.session_state["_editing_pvd"] = None
+                            st.rerun()
+            else:
+                c1, c2, c3 = st.columns([5, 1, 1])
+                with c1:
+                    st.markdown(f"`{p['name']}`　`{p['base_url']}`　`{p['framework']}`")
+                    st.caption(f"Key: {p['api_key'][:8]}…{p['api_key'][-4:]}")
+                with c2:
+                    if st.button("✏️", key=f"edit_pvd_{p['id']}", help="编辑"):
+                        st.session_state["_editing_pvd"] = p["id"]
+                        st.session_state["_editing_mdl"] = None
+                        st.rerun()
+                with c3:
+                    if st.button("🗑️", key=f"del_pvd2_{p['id']}", help="删除"):
+                        remove_llm_provider(p["id"])
+                        st.rerun()
     else:
         st.caption("暂无 Provider，请在下方添加。")
 
@@ -231,18 +264,49 @@ def _render_llm_settings() -> None:
     st.markdown("**🤖 模型列表**")
     if models:
         for m in models:
-            c1, c2 = st.columns([6, 1])
-            with c1:
-                st.markdown(
-                    f"`{m['display_name']}`　`{m['name']}`　"
-                    f"via `{pvd_map.get(m['provider_id'], '?')}`"
-                )
-            with c2:
-                if st.button("🗑️", key=f"del_mdl_{m['id']}", help="删除此模型"):
-                    remove_llm_model(m["id"])
-                    if st.session_state.get("llm_selected_model") == m["id"]:
-                        st.session_state["llm_selected_model"] = None
-                    st.rerun()
+            editing = st.session_state.get("_editing_mdl") == m["id"]
+            if editing:
+                with st.container(border=True):
+                    em_name = st.text_input("模型 ID", value=m["name"],
+                                            key=f"em_name_{m['id']}")
+                    em_disp = st.text_input("显示名称", value=m["display_name"],
+                                            key=f"em_disp_{m['id']}")
+                    sa, sb, sc = st.columns(3)
+                    with sa:
+                        if st.button("💾 保存", key=f"save_mdl_{m['id']}", type="primary"):
+                            update_llm_model(m["id"], name=em_name,
+                                             display_name=em_disp or em_name)
+                            st.session_state["_editing_mdl"] = None
+                            st.rerun()
+                    with sb:
+                        if st.button("取消", key=f"cancel_mdl_{m['id']}"):
+                            st.session_state["_editing_mdl"] = None
+                            st.rerun()
+                    with sc:
+                        if st.button("🗑️ 删除", key=f"del_mdl_{m['id']}"):
+                            remove_llm_model(m["id"])
+                            if st.session_state.get("llm_selected_model") == m["id"]:
+                                st.session_state["llm_selected_model"] = None
+                            st.session_state["_editing_mdl"] = None
+                            st.rerun()
+            else:
+                c1, c2, c3 = st.columns([5, 1, 1])
+                with c1:
+                    st.markdown(
+                        f"`{m['display_name']}`　`{m['name']}`　"
+                        f"via `{pvd_map.get(m['provider_id'], '?')}`"
+                    )
+                with c2:
+                    if st.button("✏️", key=f"edit_mdl_{m['id']}", help="编辑"):
+                        st.session_state["_editing_mdl"] = m["id"]
+                        st.session_state["_editing_pvd"] = None
+                        st.rerun()
+                with c3:
+                    if st.button("🗑️", key=f"del_mdl2_{m['id']}", help="删除"):
+                        remove_llm_model(m["id"])
+                        if st.session_state.get("llm_selected_model") == m["id"]:
+                            st.session_state["llm_selected_model"] = None
+                        st.rerun()
     else:
         st.caption("暂无模型，请在下方添加。")
 
@@ -279,7 +343,7 @@ def _render_llm_settings() -> None:
 def _render_qa() -> None:
     models = get_llm_models()
 
-    # ── 配置管理面板 ────────────────────────────────────────────────────────
+    # ── 配置管理面板（有模型时默认折叠） ────────────────────────────────────
     with st.expander("⚙️ 模型与 API 配置", expanded=not models):
         _render_llm_settings()
 
@@ -287,47 +351,48 @@ def _render_qa() -> None:
         st.info("请先在上方「模型与 API 配置」中添加 Provider 和模型。")
         return
 
-    st.divider()
-
-    # ── 模型选择 ────────────────────────────────────────────────────────────
-    model_ids   = [m["id"] for m in models]
-    model_names = [m["display_name"] for m in models]
-
+    # ── 模型选择 + 清空按钮（同行） ─────────────────────────────────────────
+    model_ids = [m["id"] for m in models]
     cur_model = st.session_state.get("llm_selected_model")
     if cur_model not in model_ids:
         cur_model = model_ids[0]
         st.session_state["llm_selected_model"] = cur_model
 
-    selected_idx = model_ids.index(cur_model)
-    chosen = st.selectbox(
-        "选择模型",
-        options=model_ids,
-        index=selected_idx,
-        format_func=lambda mid: next((m["display_name"] for m in models if m["id"] == mid), mid),
-        key="llm_model_select",
-    )
-    if chosen != st.session_state.get("llm_selected_model"):
-        st.session_state["llm_selected_model"] = chosen
-        st.rerun()
-
-    # ── 历史对话展示 ────────────────────────────────────────────────────────
-    history: list[dict] = st.session_state.get("llm_chat_history", [])
-    for msg in history:
-        role  = msg["role"]
-        label = "🧑 你" if role == "user" else "🤖 AI"
-        with st.chat_message(role):
-            st.markdown(msg["content"])
-
-    # ── 输入区 ──────────────────────────────────────────────────────────────
-    user_input = st.chat_input("输入问题…")
-
-    col_clear, _ = st.columns([1, 5])
-    with col_clear:
-        if st.button("🗑️ 清空对话", key="clear_chat_btn") and history:
+    col_sel, col_clr = st.columns([4, 1])
+    with col_sel:
+        chosen = st.selectbox(
+            "选择模型",
+            options=model_ids,
+            index=model_ids.index(cur_model),
+            format_func=lambda mid: next(
+                (m["display_name"] for m in models if m["id"] == mid), mid
+            ),
+            key="llm_model_select",
+            label_visibility="collapsed",
+        )
+        if chosen != st.session_state.get("llm_selected_model"):
+            st.session_state["llm_selected_model"] = chosen
+            st.rerun()
+    with col_clr:
+        history: list[dict] = st.session_state.get("llm_chat_history", [])
+        if st.button("🗑️ 清空", key="clear_chat_btn", disabled=not history):
             st.session_state["llm_chat_history"] = []
             st.rerun()
 
+    # ── 对话气泡（固定高度滚动区，消息始终可见） ─────────────────────────────
+    history = st.session_state.get("llm_chat_history", [])
+    with st.container(height=460, border=True):
+        if not history:
+            st.caption("💬 对话将显示在这里，请在下方输入问题。")
+        for msg in history:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+    # ── 输入框（Streamlit 自动固定在页面底部） ───────────────────────────────
+    user_input = st.chat_input("输入问题…")
+
     if user_input and user_input.strip():
+        history = st.session_state.get("llm_chat_history", [])
         history.append({"role": "user", "content": user_input.strip()})
         st.session_state["llm_chat_history"] = history
 
@@ -338,7 +403,7 @@ def _render_qa() -> None:
                 history.append({"role": "assistant", "content": reply})
                 st.session_state["llm_chat_history"] = history
             except Exception as e:
-                history.pop()  # 回滚用户消息，避免残留
+                history.pop()
                 st.session_state["llm_chat_history"] = history
                 st.error(f"调用失败：{e}")
         st.rerun()

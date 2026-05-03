@@ -25,6 +25,8 @@ def init_state() -> None:
         # 智能问答
         "llm_selected_model":    None,   # model_id str | None
         "llm_chat_history":      [],     # [{"role": ..., "content": ...}]
+        "_editing_pvd":          None,
+        "_editing_mdl":          None,
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
