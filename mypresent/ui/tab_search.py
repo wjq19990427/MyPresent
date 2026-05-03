@@ -402,11 +402,11 @@ def _render_qa() -> None:
                 reply = call_llm(history, model_id)
                 history.append({"role": "assistant", "content": reply})
                 st.session_state["llm_chat_history"] = history
+                st.rerun()
             except Exception as e:
                 history.pop()
                 st.session_state["llm_chat_history"] = history
                 st.error(f"调用失败：{e}")
-        st.rerun()
 
 
 # ─── Tab 入口 ─────────────────────────────────────────────────────────────────
