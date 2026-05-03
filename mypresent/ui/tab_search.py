@@ -1,4 +1,4 @@
-"""搜索 Tab — 日期过滤（Phase 2.2）+ 语义检索（Phase 2.3）。"""
+"""搜索 Tab — 日期过滤 / 语义检索 / 智能问答。"""
 from __future__ import annotations
 
 import streamlit as st
@@ -6,19 +6,21 @@ import streamlit as st
 from ..constants import COLS
 from ..db import load_db
 from ..vector_db import _get_collection, _get_embedder
+from ..llm import (
+    get_llm_providers, get_llm_models,
+    add_llm_provider, remove_llm_provider,
+    add_llm_model, remove_llm_model,
+    call_llm,
+)
 from .components import _render_card, _render_detail
 
 
+# ─── 搜索结果渲染 ────────────────────────────────────────────────────────────
+
 def _render_search_results(sessions_scores: list[tuple], state_key: str) -> None:
-    """渲染搜索结果卡片列表，score 为 None 时不显示相似度。"""
     all_db  = load_db()
     db_map  = {s["session_id"]: s for s in all_db}
-
-    rows = []
-    for sid, score in sessions_scores:
-        session = db_map.get(sid)
-        if session:
-            rows.append((session, score))
+    rows    = [(db_map[sid], sc) for sid, sc in sessions_scores if sid in db_map]
 
     if not rows:
         st.info("没有找到匹配的记录。")
@@ -37,8 +39,9 @@ def _render_search_results(sessions_scores: list[tuple], state_key: str) -> None
             _render_detail(target, "final", state_key=state_key)
 
 
+# ─── 日期过滤 ─────────────────────────────────────────────────────────────────
+
 def _render_date_filter() -> None:
-    """Phase 2.2：日期范围过滤检索。结果持久化到 session_state。"""
     c1, c2 = st.columns(2)
     with c1:
         start = st.date_input("开始日期", value=None, key="filter_start")
@@ -105,22 +108,19 @@ def _render_date_filter() -> None:
         sorted_data = sorted(exact_data,
                              key=lambda x: x[1].get("content_time_num", 0),
                              reverse=True)
-        _render_search_results(
-            [(sid, None) for sid, _ in sorted_data], "search_selected"
-        )
+        _render_search_results([(sid, None) for sid, _ in sorted_data], "search_selected")
     else:
         st.caption(f"该日期范围（{start_str} 至 {end_str}）内无精确日期记录")
 
     if fuzzy_ids:
         st.divider()
         with st.expander(f"⚠️ 以下 {len(fuzzy_ids)} 条记录使用了模糊时间描述，无法按日期过滤"):
-            _render_search_results(
-                [(sid, None) for sid in fuzzy_ids], "search_selected"
-            )
+            _render_search_results([(sid, None) for sid in fuzzy_ids], "search_selected")
 
+
+# ─── 语义检索 ─────────────────────────────────────────────────────────────────
 
 def _render_semantic_search() -> None:
-    """Phase 2.3：自然语言语义检索。结果持久化到 session_state。"""
     query = st.text_input(
         "描述你想找的内容",
         placeholder="例如：和朋友一起看日落的那次旅行……",
@@ -181,10 +181,175 @@ def _render_semantic_search() -> None:
     _render_search_results(pairs, "search_selected")
 
 
+# ─── LLM 配置管理面板 ────────────────────────────────────────────────────────
+
+def _render_llm_settings() -> None:
+    """Provider + Model 增删管理，放在 expander 内。"""
+    providers = get_llm_providers()
+    models    = get_llm_models()
+    pvd_map   = {p["id"]: p["name"] for p in providers}
+
+    # ── Provider 列表 ──────────────────────────────────────────────────────
+    st.markdown("**🔌 API Provider**")
+    if providers:
+        for p in providers:
+            c1, c2 = st.columns([6, 1])
+            with c1:
+                st.markdown(f"`{p['name']}`　`{p['base_url']}`　`{p['framework']}`")
+                st.caption(f"Key: {p['api_key'][:8]}…{p['api_key'][-4:]}")
+            with c2:
+                if st.button("🗑️", key=f"del_pvd_{p['id']}", help="删除此 Provider"):
+                    remove_llm_provider(p["id"])
+                    st.rerun()
+    else:
+        st.caption("暂无 Provider，请在下方添加。")
+
+    with st.expander("➕ 添加 Provider", expanded=not providers):
+        np_name = st.text_input("名称", key="np_name", placeholder="老张AI")
+        np_url  = st.text_input("Base URL", key="np_url",
+                                placeholder="https://api.laozhang.ai/v1")
+        np_key  = st.text_input("API Key", key="np_key", type="password",
+                                placeholder="sk-...")
+        np_fw   = st.selectbox("框架", ["openai"], key="np_fw",
+                               help="openai = 兼容 OpenAI SDK 的所有 API")
+        if st.button("添加 Provider", key="add_pvd_btn", type="primary"):
+            if np_name and np_url and np_key:
+                try:
+                    add_llm_provider(np_name, np_url, np_key, np_fw)
+                    for k in ("np_name", "np_url", "np_key"):
+                        st.session_state.pop(k, None)
+                    st.success("Provider 已添加")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"添加失败：{e}")
+            else:
+                st.warning("名称 / Base URL / API Key 均不能为空")
+
+    st.divider()
+
+    # ── Model 列表 ─────────────────────────────────────────────────────────
+    st.markdown("**🤖 模型列表**")
+    if models:
+        for m in models:
+            c1, c2 = st.columns([6, 1])
+            with c1:
+                st.markdown(
+                    f"`{m['display_name']}`　`{m['name']}`　"
+                    f"via `{pvd_map.get(m['provider_id'], '?')}`"
+                )
+            with c2:
+                if st.button("🗑️", key=f"del_mdl_{m['id']}", help="删除此模型"):
+                    remove_llm_model(m["id"])
+                    if st.session_state.get("llm_selected_model") == m["id"]:
+                        st.session_state["llm_selected_model"] = None
+                    st.rerun()
+    else:
+        st.caption("暂无模型，请在下方添加。")
+
+    if providers:
+        with st.expander("➕ 添加模型", expanded=not models):
+            nm_pvd  = st.selectbox(
+                "所属 Provider",
+                options=[p["id"] for p in providers],
+                format_func=lambda pid: pvd_map.get(pid, pid),
+                key="nm_pvd",
+            )
+            nm_name = st.text_input("模型 ID", key="nm_name",
+                                    placeholder="gpt-4o-mini")
+            nm_disp = st.text_input("显示名称（留空同模型 ID）", key="nm_disp",
+                                    placeholder="GPT-4o Mini")
+            if st.button("添加模型", key="add_mdl_btn", type="primary"):
+                if nm_name and nm_pvd:
+                    try:
+                        add_llm_model(nm_name, nm_pvd, nm_disp)
+                        for k in ("nm_name", "nm_disp"):
+                            st.session_state.pop(k, None)
+                        st.success("模型已添加")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"添加失败：{e}")
+                else:
+                    st.warning("请填写模型 ID 并选择 Provider")
+    else:
+        st.info("请先添加 Provider 再添加模型。")
+
+
+# ─── 智能问答 ─────────────────────────────────────────────────────────────────
+
+def _render_qa() -> None:
+    models = get_llm_models()
+
+    # ── 配置管理面板 ────────────────────────────────────────────────────────
+    with st.expander("⚙️ 模型与 API 配置", expanded=not models):
+        _render_llm_settings()
+
+    if not models:
+        st.info("请先在上方「模型与 API 配置」中添加 Provider 和模型。")
+        return
+
+    st.divider()
+
+    # ── 模型选择 ────────────────────────────────────────────────────────────
+    model_ids   = [m["id"] for m in models]
+    model_names = [m["display_name"] for m in models]
+
+    cur_model = st.session_state.get("llm_selected_model")
+    if cur_model not in model_ids:
+        cur_model = model_ids[0]
+        st.session_state["llm_selected_model"] = cur_model
+
+    selected_idx = model_ids.index(cur_model)
+    chosen = st.selectbox(
+        "选择模型",
+        options=model_ids,
+        index=selected_idx,
+        format_func=lambda mid: next((m["display_name"] for m in models if m["id"] == mid), mid),
+        key="llm_model_select",
+    )
+    if chosen != st.session_state.get("llm_selected_model"):
+        st.session_state["llm_selected_model"] = chosen
+        st.rerun()
+
+    # ── 历史对话展示 ────────────────────────────────────────────────────────
+    history: list[dict] = st.session_state.get("llm_chat_history", [])
+    for msg in history:
+        role  = msg["role"]
+        label = "🧑 你" if role == "user" else "🤖 AI"
+        with st.chat_message(role):
+            st.markdown(msg["content"])
+
+    # ── 输入区 ──────────────────────────────────────────────────────────────
+    user_input = st.chat_input("输入问题…")
+
+    col_clear, _ = st.columns([1, 5])
+    with col_clear:
+        if st.button("🗑️ 清空对话", key="clear_chat_btn") and history:
+            st.session_state["llm_chat_history"] = []
+            st.rerun()
+
+    if user_input and user_input.strip():
+        history.append({"role": "user", "content": user_input.strip()})
+        st.session_state["llm_chat_history"] = history
+
+        model_id = st.session_state.get("llm_selected_model")
+        with st.spinner("思考中…"):
+            try:
+                reply = call_llm(history, model_id)
+                history.append({"role": "assistant", "content": reply})
+                st.session_state["llm_chat_history"] = history
+            except Exception as e:
+                history.pop()  # 回滚用户消息，避免残留
+                st.session_state["llm_chat_history"] = history
+                st.error(f"调用失败：{e}")
+        st.rerun()
+
+
+# ─── Tab 入口 ─────────────────────────────────────────────────────────────────
+
 def render_search_tab() -> None:
     mode = st.radio(
         "检索模式",
-        ["📅 日期过滤", "🔍 语义检索", "💬 智能问答（即将上线）"],
+        ["📅 日期过滤", "🔍 语义检索", "💬 智能问答"],
         horizontal=True,
         key="search_mode",
     )
@@ -197,13 +362,11 @@ def render_search_tab() -> None:
         st.session_state["search_selected"]   = None
         st.session_state["_search_mode_prev"] = mode
 
-    if mode == "💬 智能问答（即将上线）":
-        st.info("智能问答功能正在开发中（Phase 2.4），敬请期待。")
-        return
-
     st.divider()
 
     if mode == "📅 日期过滤":
         _render_date_filter()
-    else:
+    elif mode == "🔍 语义检索":
         _render_semantic_search()
+    else:
+        _render_qa()

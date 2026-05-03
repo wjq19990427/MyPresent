@@ -22,6 +22,9 @@ def init_state() -> None:
         "folder_scan_results":   [],
         "folder_import_done":    0,
         "_show_no_tag_only":     False,
+        # 智能问答
+        "llm_selected_model":    None,   # model_id str | None
+        "llm_chat_history":      [],     # [{"role": ..., "content": ...}]
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
