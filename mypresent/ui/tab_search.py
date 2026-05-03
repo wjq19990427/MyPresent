@@ -358,15 +358,20 @@ def _render_qa() -> None:
         cur_model = model_ids[0]
         st.session_state["llm_selected_model"] = cur_model
 
+    providers   = get_llm_providers()
+    pvd_name    = {p["id"]: p["name"] for p in providers}
+    mdl_label   = {
+        m["id"]: f"{pvd_name.get(m['provider_id'], '?')}  ·  {m['display_name']}"
+        for m in models
+    }
+
     col_sel, col_clr = st.columns([4, 1])
     with col_sel:
         chosen = st.selectbox(
             "选择模型",
             options=model_ids,
             index=model_ids.index(cur_model),
-            format_func=lambda mid: next(
-                (m["display_name"] for m in models if m["id"] == mid), mid
-            ),
+            format_func=lambda mid: mdl_label.get(mid, mid),
             key="llm_model_select",
             label_visibility="collapsed",
         )
