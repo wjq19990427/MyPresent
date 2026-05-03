@@ -114,6 +114,36 @@ def update_llm_model(model_id: str, **kwargs) -> None:
     save_config(cfg)
 
 
+# ─── 测试调用（不依赖已保存 config） ─────────────────────────────────────────
+
+def call_llm_with_config(messages: list[dict], model: dict, provider: dict) -> str:
+    """使用临时配置调用 LLM，用于新增配置前的连通性测试。
+
+    model    须含 name 字段
+    provider 须含 framework / base_url / api_key 字段
+    """
+    framework = provider.get("framework", "openai")
+
+    if framework == "openai":
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=provider["api_key"],
+            base_url=provider["base_url"],
+        )
+        completion = client.chat.completions.create(
+            model=model["name"],
+            stream=False,
+            messages=messages,
+        )
+        return completion.choices[0].message.content or ""
+
+    # 预留其他框架扩展点（后台按需添加分支）
+    # elif framework == "anthropic": ...
+    # elif framework == "zhipuai":   ...
+
+    raise NotImplementedError(f"暂不支持框架：{framework}")
+
+
 # ─── 调用入口 ─────────────────────────────────────────────────────────────────
 
 def call_llm(messages: list[dict], model_id: str) -> str:

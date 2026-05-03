@@ -10,7 +10,7 @@ from ..llm import (
     get_llm_providers, get_llm_models,
     add_llm_provider, remove_llm_provider, update_llm_provider,
     add_llm_model, remove_llm_model, update_llm_model,
-    call_llm,
+    call_llm, call_llm_with_config,
 )
 from .components import _render_card, _render_detail
 
@@ -183,32 +183,39 @@ def _render_semantic_search() -> None:
 
 # ─── LLM 配置管理面板 ────────────────────────────────────────────────────────
 
-def _render_llm_settings() -> None:
-    """Provider + Model 增删改管理，放在 expander 内。"""
-    providers = get_llm_providers()
-    models    = get_llm_models()
-    pvd_map   = {p["id"]: p["name"] for p in providers}
+def _clear_draft() -> None:
+    for k in ("_draft_provider", "_draft_model"):
+        st.session_state[k] = None
+    st.session_state["_draft_test_history"] = []
+    st.session_state["_draft_test_passed"]  = False
 
-    # ── Provider 列表 ──────────────────────────────────────────────────────
+
+def _render_llm_settings() -> None:
+    """Provider + Model 增删改管理 + 测试后确认的新增流程。"""
+    providers   = get_llm_providers()
+    models      = get_llm_models()
+    pvd_map     = {p["id"]: p["name"] for p in providers}
+    draft_pvd   = st.session_state.get("_draft_provider")
+    draft_mdl   = st.session_state.get("_draft_model")
+    test_hist   = st.session_state.get("_draft_test_history") or []
+    test_passed = st.session_state.get("_draft_test_passed", False)
+
+    # ── 已有 Provider 列表 ──────────────────────────────────────────────
     st.markdown("**🔌 API Provider**")
     if providers:
         for p in providers:
-            editing = st.session_state.get("_editing_pvd") == p["id"]
-            if editing:
+            if st.session_state.get("_editing_pvd") == p["id"]:
                 with st.container(border=True):
-                    ep_name = st.text_input("名称", value=p["name"],
-                                            key=f"ep_name_{p['id']}")
-                    ep_url  = st.text_input("Base URL", value=p["base_url"],
-                                            key=f"ep_url_{p['id']}")
+                    ep_name = st.text_input("名称", value=p["name"], key=f"ep_name_{p['id']}")
+                    ep_url  = st.text_input("Base URL", value=p["base_url"], key=f"ep_url_{p['id']}")
                     ep_key  = st.text_input("API Key", value=p["api_key"],
                                             key=f"ep_key_{p['id']}", type="password")
                     ep_fw   = st.selectbox("框架", ["openai"], key=f"ep_fw_{p['id']}")
                     sa, sb, sc = st.columns(3)
                     with sa:
                         if st.button("💾 保存", key=f"save_pvd_{p['id']}", type="primary"):
-                            update_llm_provider(p["id"], name=ep_name,
-                                                base_url=ep_url, api_key=ep_key,
-                                                framework=ep_fw)
+                            update_llm_provider(p["id"], name=ep_name, base_url=ep_url,
+                                                api_key=ep_key, framework=ep_fw)
                             st.session_state["_editing_pvd"] = None
                             st.rerun()
                     with sb:
@@ -235,42 +242,18 @@ def _render_llm_settings() -> None:
                         remove_llm_provider(p["id"])
                         st.rerun()
     else:
-        st.caption("暂无 Provider，请在下方添加。")
-
-    with st.expander("➕ 添加 Provider", expanded=not providers):
-        np_name = st.text_input("名称", key="np_name", placeholder="老张AI")
-        np_url  = st.text_input("Base URL", key="np_url",
-                                placeholder="https://api.laozhang.ai/v1")
-        np_key  = st.text_input("API Key", key="np_key", type="password",
-                                placeholder="sk-...")
-        np_fw   = st.selectbox("框架", ["openai"], key="np_fw",
-                               help="openai = 兼容 OpenAI SDK 的所有 API")
-        if st.button("添加 Provider", key="add_pvd_btn", type="primary"):
-            if np_name and np_url and np_key:
-                try:
-                    add_llm_provider(np_name, np_url, np_key, np_fw)
-                    for k in ("np_name", "np_url", "np_key"):
-                        st.session_state.pop(k, None)
-                    st.success("Provider 已添加")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"添加失败：{e}")
-            else:
-                st.warning("名称 / Base URL / API Key 均不能为空")
+        st.caption("暂无已保存的 Provider。")
 
     st.divider()
 
-    # ── Model 列表 ─────────────────────────────────────────────────────────
-    st.markdown("**🤖 模型列表**")
+    # ── 已有 Model 列表 ────────────────────────────────────────────────
+    st.markdown("**🤖 已保存模型**")
     if models:
         for m in models:
-            editing = st.session_state.get("_editing_mdl") == m["id"]
-            if editing:
+            if st.session_state.get("_editing_mdl") == m["id"]:
                 with st.container(border=True):
-                    em_name = st.text_input("模型 ID", value=m["name"],
-                                            key=f"em_name_{m['id']}")
-                    em_disp = st.text_input("显示名称", value=m["display_name"],
-                                            key=f"em_disp_{m['id']}")
+                    em_name = st.text_input("模型 ID", value=m["name"], key=f"em_name_{m['id']}")
+                    em_disp = st.text_input("显示名称", value=m["display_name"], key=f"em_disp_{m['id']}")
                     sa, sb, sc = st.columns(3)
                     with sa:
                         if st.button("💾 保存", key=f"save_mdl_{m['id']}", type="primary"):
@@ -308,18 +291,14 @@ def _render_llm_settings() -> None:
                             st.session_state["llm_selected_model"] = None
                         st.rerun()
     else:
-        st.caption("暂无模型，请在下方添加。")
+        st.caption("暂无已保存模型。")
 
-    if providers:
-        with st.expander("➕ 添加模型", expanded=not models):
-            nm_pvd  = st.selectbox(
-                "所属 Provider",
-                options=[p["id"] for p in providers],
-                format_func=lambda pid: pvd_map.get(pid, pid),
-                key="nm_pvd",
-            )
-            nm_name = st.text_input("模型 ID", key="nm_name",
-                                    placeholder="gpt-4o-mini")
+    # 为已有 Provider 追加模型（Provider 已验证，直接保存）
+    if providers and not draft_pvd:
+        with st.expander("➕ 为已有 Provider 追加模型"):
+            nm_pvd  = st.selectbox("所属 Provider", options=[p["id"] for p in providers],
+                                   format_func=lambda pid: pvd_map.get(pid, pid), key="nm_pvd")
+            nm_name = st.text_input("模型 ID", key="nm_name", placeholder="gpt-4o-mini")
             nm_disp = st.text_input("显示名称（留空同模型 ID）", key="nm_disp",
                                     placeholder="GPT-4o Mini")
             if st.button("添加模型", key="add_mdl_btn", type="primary"):
@@ -334,8 +313,95 @@ def _render_llm_settings() -> None:
                         st.error(f"添加失败：{e}")
                 else:
                     st.warning("请填写模型 ID 并选择 Provider")
+
+    st.divider()
+
+    # ── 新增配置：测试后确认流程 ────────────────────────────────────────
+    if draft_pvd and draft_mdl:
+        # ── 测试模式 ──────────────────────────────────────────────────
+        st.markdown(f"**🧪 测试中** — `{draft_pvd['name']}`  ·  `{draft_mdl['display_name']}`（未保存）")
+        with st.container(border=True):
+            if not test_hist:
+                st.caption("发送一条消息，验证 API 是否可正常调用。")
+            for msg in test_hist:
+                with st.chat_message(msg["role"]):
+                    st.markdown(msg["content"])
+            ti_col, btn_col = st.columns([4, 1])
+            with ti_col:
+                test_msg = st.text_input("测试消息", key="draft_test_input",
+                                         placeholder="你好，请简单回复一句话",
+                                         label_visibility="collapsed")
+            with btn_col:
+                send_test = st.button("▶ 发送", key="draft_send_btn",
+                                      type="primary", use_container_width=True)
+            if send_test and test_msg.strip():
+                msgs = test_hist + [{"role": "user", "content": test_msg.strip()}]
+                with st.spinner("调用中…"):
+                    try:
+                        reply = call_llm_with_config(msgs, draft_mdl, draft_pvd)
+                        msgs.append({"role": "assistant", "content": reply})
+                        st.session_state["_draft_test_history"] = msgs
+                        st.session_state["_draft_test_passed"]  = True
+                        st.session_state.pop("draft_test_input", None)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"调用失败：{e}")
+
+        if test_passed:
+            st.success("✅ API 调用成功，可以保存配置了。")
+
+        ca, cb, cc = st.columns(3)
+        with ca:
+            if st.button("✅ 确认保存", key="draft_confirm_btn",
+                         type="primary", disabled=not test_passed):
+                pvd_id = add_llm_provider(
+                    draft_pvd["name"], draft_pvd["base_url"],
+                    draft_pvd["api_key"], draft_pvd["framework"],
+                )
+                add_llm_model(draft_mdl["name"], pvd_id, draft_mdl["display_name"])
+                _clear_draft()
+                st.success("配置已保存！")
+                st.rerun()
+        with cb:
+            if st.button("✏️ 修改配置", key="draft_edit_btn"):
+                _clear_draft()
+                st.rerun()
+        with cc:
+            if st.button("❌ 放弃", key="draft_cancel_btn"):
+                _clear_draft()
+                st.rerun()
     else:
-        st.info("请先添加 Provider 再添加模型。")
+        # ── 新增 Provider + 首个模型（测试前填写）─────────────────────
+        with st.expander("➕ 新增 Provider + 首个模型", expanded=not providers):
+            st.markdown("**Provider 信息**")
+            np_name = st.text_input("名称", key="np_name", placeholder="老张AI")
+            np_url  = st.text_input("Base URL", key="np_url",
+                                    placeholder="https://api.laozhang.ai/v1")
+            np_key  = st.text_input("API Key", key="np_key", type="password",
+                                    placeholder="sk-...")
+            np_fw   = st.selectbox("框架", ["openai"], key="np_fw",
+                                   help="openai = 兼容 OpenAI SDK 的所有 API")
+            st.markdown("**首个模型（用于测试）**")
+            np_mname = st.text_input("模型 ID", key="np_mname", placeholder="gpt-4o-mini")
+            np_mdisp = st.text_input("显示名称（留空同模型 ID）", key="np_mdisp",
+                                     placeholder="GPT-4o Mini")
+            if st.button("🧪 开始测试", key="start_test_btn", type="primary"):
+                if np_name and np_url and np_key and np_mname:
+                    st.session_state["_draft_provider"] = {
+                        "name":      np_name.strip(),
+                        "base_url":  np_url.strip().rstrip("/"),
+                        "api_key":   np_key.strip(),
+                        "framework": np_fw,
+                    }
+                    st.session_state["_draft_model"] = {
+                        "name":         np_mname.strip(),
+                        "display_name": np_mdisp.strip() or np_mname.strip(),
+                    }
+                    st.session_state["_draft_test_history"] = []
+                    st.session_state["_draft_test_passed"]  = False
+                    st.rerun()
+                else:
+                    st.warning("请填写所有必要字段（名称、Base URL、API Key、模型 ID）")
 
 
 # ─── 智能问答 ─────────────────────────────────────────────────────────────────

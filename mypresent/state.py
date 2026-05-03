@@ -27,6 +27,11 @@ def init_state() -> None:
         "llm_chat_history":      [],     # [{"role": ..., "content": ...}]
         "_editing_pvd":          None,
         "_editing_mdl":          None,
+        # 新增配置测试流程
+        "_draft_provider":       None,
+        "_draft_model":          None,
+        "_draft_test_history":   [],
+        "_draft_test_passed":    False,
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
