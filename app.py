@@ -3,27 +3,31 @@ from __future__ import annotations
 
 import streamlit as st
 
-from mypresent.file_io import ensure_dirs
-from mypresent.state import init_state
-from mypresent.vector_db import _ensure_indexed
-from mypresent.ui.tab_upload import render_upload_tab
-from mypresent.ui.tab_gallery import render_gallery_tab
-from mypresent.ui.tab_archived import render_archived_tab
-from mypresent.ui.tab_search import render_search_tab
+from core.db_manager import init_db
+from core.file_io import ensure_dirs
+from core.state import init_state
+from core.vector_db import _ensure_indexed
+from components.tab_upload import render_upload_tab
+from components.tab_gallery import render_gallery_tab
+from components.tab_archived import render_archived_tab
+from components.tab_search import render_search_tab
+from components.eval_dashboard import render_eval_dashboard
 
 
 def main() -> None:
     st.set_page_config(page_title="灵感记录工具", page_icon="🗂️", layout="wide")
+    init_db()
     ensure_dirs()
     init_state()
     _ensure_indexed()
 
     st.title("🗂️ 灵感记录工具")
-    tab1, tab2, tab3, tab4 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🗂️ 记录舱（上传）",
         "🖼️ 灵感墙（待处理）",
         "📚 已归档",
         "🔍 搜索",
+        "📊 运行看板",
     ])
 
     with tab1:
@@ -34,6 +38,8 @@ def main() -> None:
         render_archived_tab()
     with tab4:
         render_search_tab()
+    with tab5:
+        render_eval_dashboard()
 
 
 if __name__ == "__main__":

@@ -23,17 +23,17 @@ def init_state() -> None:
         "folder_import_done":    0,
         "_show_no_tag_only":     False,
         # 智能问答
-        "llm_selected_model":    None,   # model_id str | None
-        "llm_chat_history":      [],     # [{"role": ..., "content": ...}]
+        "llm_selected_model":    None,
+        "llm_chat_history":      [],
         "_editing_pvd":          None,
         "_editing_mdl":          None,
         # 新增/编辑配置测试流程
         "_draft_provider":       None,
         "_draft_model":          None,
-        "_test_result":          None,   # {"sent": str, "reply": str} | None
+        "_test_result":          None,
         "_draft_test_passed":    False,
-        "_confirm_edit_pvd":     None,   # 待用户确认修改的 provider_id
-        "_confirm_edit_mdl":     None,   # 待用户确认修改的 model_id
+        "_confirm_edit_pvd":     None,
+        "_confirm_edit_mdl":     None,
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v

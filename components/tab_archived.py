@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ..constants import COLS
-from ..config import get_groups, get_tags_registry
-from ..db import load_db
-from ..file_io import _session_file_type
-from .components import _render_card, _render_detail, _render_tag_manager, _render_group_manager
+from core.constants import COLS
+from core.db_manager import get_groups, get_tags_registry, load_db
+from core.file_io import _session_file_type
+from components.cards import _render_card, _render_detail, _render_tag_manager, _render_group_manager
 
 
 def render_archived_tab() -> None:
@@ -22,7 +21,6 @@ def render_archived_tab() -> None:
         st.info("暂无已归档记录。在「灵感墙」补全后归档，或在「记录舱」直接完成归档。")
         return
 
-    # ── 无标签提醒 ──────────────────────────────────────────────────────────
     no_tag_count = sum(1 for s in all_finals if not s.get("tags"))
     if no_tag_count:
         with st.container():
@@ -38,7 +36,6 @@ def render_archived_tab() -> None:
                     st.session_state["_show_no_tag_only"] = True
                     st.rerun()
 
-    # ── 分组导航 ────────────────────────────────────────────────────────────
     groups    = get_groups()
     group_map = {g["id"]: g["name"] for g in groups}
     if groups:
@@ -57,7 +54,6 @@ def render_archived_tab() -> None:
                     st.session_state["archived_selected"] = None
                     st.rerun()
 
-    # ── 文件类型 + 标签过滤 ─────────────────────────────────────────────────
     fc1, fc2 = st.columns([2, 3])
     with fc1:
         type_filter = st.radio(
@@ -74,7 +70,6 @@ def render_archived_tab() -> None:
             placeholder="选择标签过滤，多选取并集",
         )
 
-    # ── 管理工具 ────────────────────────────────────────────────────────────
     m1, m2 = st.columns(2)
     with m1:
         with st.expander("⚙️ 管理标签"):
@@ -83,9 +78,7 @@ def render_archived_tab() -> None:
         with st.expander("⚙️ 管理分组"):
             _render_group_manager()
 
-    # ── 过滤 ────────────────────────────────────────────────────────────────
     db = all_finals
-
     gf = st.session_state.get("archived_group_filter")
     if gf:
         db = [s for s in db if gf in s.get("group_ids", [])]
@@ -97,7 +90,6 @@ def render_archived_tab() -> None:
     if tag_filter:
         db = [s for s in db if any(t in s.get("tags", []) for t in tag_filter)]
 
-    # 无标签专项过滤（点击「只看无标签记录」按钮后激活）
     if st.session_state.get("_show_no_tag_only"):
         db = [s for s in db if not s.get("tags")]
         st.info("📋 当前仅显示**无标签**记录，请逐一进入编辑添加标签。")

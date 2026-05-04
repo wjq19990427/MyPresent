@@ -1,18 +1,17 @@
-"""全局常量、路径、文件格式集合、FIELD_SCHEMA。
+"""全局常量、路径、文件格式、FIELD_SCHEMA。
 
-扩展字段只需修改 FIELD_SCHEMA，UI / 校验 / .md 生成逻辑自动跟随。
+扩展字段只需修改 FIELD_SCHEMA，UI / 校验 / .md 生成自动跟随。
 """
 from __future__ import annotations
 
 from pathlib import Path
 
 # ─── 路径 ──────────────────────────────────────────────────────────────────────
-ASSETS_DIR    = Path("Assets")
-FINAL_DIR     = ASSETS_DIR / "Final"
-PENDING_DIR   = ASSETS_DIR / "Pending"
-DB_FILE       = Path("pending_db.json")
+DATA_DIR      = Path("data")
+FINAL_DIR     = DATA_DIR / "final"
+PENDING_DIR   = DATA_DIR / "pending"
+DB_PATH       = DATA_DIR / "database.db"
 VECTOR_DB_DIR = Path(__file__).parent.parent / "vector_db"
-CONFIG_FILE   = Path("mypresent_config.json")
 
 # ─── 文件格式 ──────────────────────────────────────────────────────────────────
 TEXT_EXTS  = {".txt", ".md"}

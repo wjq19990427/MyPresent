@@ -1,26 +1,24 @@
-"""共用 UI 组件：卡片、详情面板、评论区、标签/分组管理。"""
+"""共用 UI 组件：卡片、详情面板、评论区、标签/分组管理、AI 摘要。"""
 from __future__ import annotations
 
 from pathlib import Path
 
 import streamlit as st
 
-from ..constants import (
+from core.constants import (
     COLS, DEFAULT_TAGS, FIELD_SCHEMA,
     VIDEO_EXTS, VIDEO_EXTS_PLAYABLE,
 )
-from ..config import (
+from core.db_manager import (
     get_tags_registry, get_groups,
     add_tag, remove_tag, create_group, delete_group,
-)
-from ..db import load_db, validate_session
-from ..file_io import _write_md, move_to_final
-from ..media import video_thumbnail, pil_to_png_bytes
-from ..session_ops import (
+    load_db, validate_session,
     update_session_fields, add_comment, delete_comment,
+    _is_text_session,
 )
-from ..db import _is_text_session
-from .forms import render_field_inputs
+from core.file_io import _write_md, move_to_final
+from core.media import video_thumbnail, pil_to_png_bytes
+from components.forms import render_field_inputs
 
 
 # ─── 缩略图 ─────────────────────────────────────────────────────────────────────
@@ -130,14 +128,42 @@ def _render_comments(session: dict) -> None:
             st.warning("评论内容不能为空")
 
 
+# ─── AI 摘要 ──────────────────────────────────────────────────────────────────────
+
+def _render_ai_summary(session: dict) -> None:
+    """AI 摘要面板（仅 final 记录展示）。"""
+    model_id = st.session_state.get("llm_selected_model") or ""
+    cache_key = f"_story_{session['session_id']}"
+
+    cached = st.session_state.get(cache_key)
+    with st.expander("✨ AI 摘要", expanded=bool(cached)):
+        if not model_id:
+            st.caption("请先在「搜索」Tab 选择模型，即可生成此记忆的文学化摘要。")
+            return
+        if cached:
+            st.markdown(cached)
+            if st.button("🔄 重新生成", key=f"regen_story_{session['session_id']}"):
+                del st.session_state[cache_key]
+                st.rerun()
+        else:
+            if st.button(
+                "✨ 生成 AI 摘要", key=f"gen_story_{session['session_id']}", type="primary"
+            ):
+                from skills.story_skill import StorySkill
+                with st.spinner("生成中…"):
+                    result = StorySkill().run(session, model_id=model_id)
+                if result.success:
+                    st.session_state[cache_key] = result.data["story"]
+                    st.rerun()
+                else:
+                    st.error(f"生成失败：{result.error}")
+
+
 # ─── 详情 + 编辑表单 ──────────────────────────────────────────────────────────────
 
 def _render_detail(
     session: dict, mode: str, state_key: str | None = None
 ) -> None:
-    """共用详情 + 编辑表单，mode='pending'|'final'。
-    state_key 默认由 mode 推导，搜索 Tab 需显式传入 'search_selected'。
-    """
     sid = session["session_id"]
     if state_key is None:
         state_key = "pending_selected" if mode == "pending" else "archived_selected"
@@ -172,8 +198,10 @@ def _render_detail(
                 st.video(str(fp))
             elif ext in VIDEO_EXTS:
                 size_mb = fp.stat().st_size / 1024 / 1024
-                st.info(f"🎬 {fe['original_name']}（{size_mb:.1f} MB）\n\n"
-                        "该格式浏览器不支持直接播放，请用本地播放器打开文件。")
+                st.info(
+                    f"🎬 {fe['original_name']}（{size_mb:.1f} MB）\n\n"
+                    "该格式浏览器不支持直接播放，请用本地播放器打开文件。"
+                )
                 with open(fp, "rb") as fh:
                     st.download_button(
                         "⬇️ 下载文件",
@@ -319,6 +347,9 @@ def _render_detail(
             move_to_final(sid)
             st.session_state[state_key] = None
             st.rerun()
+
+    if mode == "final":
+        _render_ai_summary(session)
 
     st.divider()
     _render_comments(session)

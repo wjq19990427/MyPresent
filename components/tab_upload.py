@@ -1,17 +1,15 @@
 """记录舱 Tab — 文件上传 / 粘贴文字 / 文件夹导入。"""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import streamlit as st
 
-from ..constants import TEXT_EXTS, SUPPORTED_IMPORT_EXTS
-from ..config import get_tags_registry
-from ..db import validate_session, FIELD_SCHEMA
-from ..file_io import save_session_pending, save_session_final, import_folder_to_pending
-from ..session_ops import auto_tag_session
-from .forms import render_field_inputs
+from core.constants import TEXT_EXTS, SUPPORTED_IMPORT_EXTS, FIELD_SCHEMA
+from core.db_manager import get_tags_registry, validate_session
+from core.file_io import save_session_pending, save_session_final, import_folder_to_pending
+from components.forms import render_field_inputs
+from skills.tagging_skill import auto_tag_session
 
 
 def _pasted_filename(text: str) -> str:
@@ -21,7 +19,6 @@ def _pasted_filename(text: str) -> str:
 
 
 def _render_folder_import() -> None:
-    """📂 导入文件夹：扫描本地路径，选择文件后批量导入为待处理记录。"""
     done = st.session_state.get("folder_import_done", 0)
     if done:
         st.success(f"✅ 已成功导入 **{done}** 条记录到灵感墙！")
@@ -77,7 +74,6 @@ def _render_folder_import() -> None:
         label_visibility="collapsed",
     )
 
-    # ── 标签（必填）────────────────────────────────────────────────────────
     st.markdown("**🏷️ 标签** **\\*（必填）**")
     folder_tags = st.multiselect(
         "标签",
@@ -92,14 +88,19 @@ def _render_folder_import() -> None:
         total_mb = sum(p.stat().st_size for p in selected_paths if p.exists()) / 1024 / 1024
         as_one   = import_mode == "所有文件合并一条记录"
         n_sess   = 1 if as_one else len(selected_paths)
-        st.caption(f"已选 **{len(selected_paths)}** 个文件，共约 {total_mb:.1f} MB → 将创建 **{n_sess}** 条待处理记录")
+        st.caption(
+            f"已选 **{len(selected_paths)}** 个文件，共约 {total_mb:.1f} MB"
+            f" → 将创建 **{n_sess}** 条待处理记录"
+        )
 
         if st.button("📥 导入到灵感墙", type="primary", key="do_import_btn"):
             if not folder_tags:
                 st.error("❌ 请至少选择一个标签后再导入")
             else:
                 with st.spinner(f"正在导入 {len(selected_paths)} 个文件…"):
-                    count = import_folder_to_pending(selected_paths, as_one_session=as_one, tags=folder_tags)
+                    count = import_folder_to_pending(
+                        selected_paths, as_one_session=as_one, tags=folder_tags
+                    )
                 st.session_state["folder_scan_results"] = []
                 st.session_state["folder_import_done"]  = count
                 st.rerun()
@@ -183,17 +184,24 @@ def render_upload_tab() -> None:
             placeholder="至少选择一个标签",
         )
     with ai_col:
-        api_ready = bool(os.environ.get("MYPRESENT_API_KEY"))
+        model_id  = st.session_state.get("llm_selected_model") or ""
+        ai_ready  = bool(model_id)
         if st.button(
             "✨ AI",
             key="upload_ai_tag_btn",
-            disabled=not api_ready,
-            help="配置 MYPRESENT_API_KEY 后可自动推荐标签",
+            disabled=not ai_ready,
+            help="在「搜索」Tab 选择模型后可自动推荐标签" if not ai_ready else "AI 推荐标签",
         ):
-            suggestions = auto_tag_session({"description": auto_description})
+            with st.spinner("AI 推荐标签中…"):
+                suggestions = auto_tag_session(
+                    {"description": auto_description, "feeling": ""},
+                    model_id=model_id,
+                )
             if suggestions:
                 st.session_state[f"upload_tags_{st.session_state.upload_key}"] = suggestions
                 st.rerun()
+            else:
+                st.warning("未能推荐到标签，请手动选择")
 
     with st.form("upload_meta_form"):
         st.markdown("### 📋 填写记录信息")

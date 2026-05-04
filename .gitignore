@@ -1,8 +1,7 @@
 # 用户数据（个人文件和数据库，不纳入版本控制）
-Assets/
-pending_db.json
+data/
 vector_db/
-mypresent_config.json
+*.bak
 
 # Python
 __pycache__/

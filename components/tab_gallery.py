@@ -5,9 +5,9 @@ from pathlib import Path
 
 import streamlit as st
 
-from ..constants import COLS
-from ..db import load_db
-from .components import _render_card, _render_detail
+from core.constants import COLS
+from core.db_manager import load_db
+from components.cards import _render_card, _render_detail
 
 
 def render_gallery_tab() -> None:

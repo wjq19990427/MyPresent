@@ -1,4 +1,4 @@
-"""ChromaDB + BGE embedding 层（Phase 2）。"""
+"""ChromaDB + BGE embedding 层。"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -6,7 +6,7 @@ from datetime import datetime
 import streamlit as st
 
 from .constants import VECTOR_DB_DIR
-from .db import load_db
+from .db_manager import load_db
 
 
 @st.cache_resource(show_spinner="正在加载 Embedding 模型（首次需要下载，请稍候）…")
@@ -26,7 +26,6 @@ def _get_collection():
 
 
 def _build_embed_text(session: dict) -> str:
-    """将 session 的文本字段拼接为用于 embedding 的文档字符串。"""
     parts = []
     for key, label in [
         ("content_time", "创建时间"),
@@ -44,7 +43,6 @@ def _build_embed_text(session: dict) -> str:
 
 
 def _parse_date_iso(raw: str) -> tuple[str, int]:
-    """将 content_time 解析为 (YYYY-MM-DD, YYYYMMDD 整数)；无法解析返回 ('', 0)。"""
     for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d",
                 "%Y-%m",   "%Y/%m",    "%Y"):
         try:
@@ -71,7 +69,6 @@ def _build_chroma_metadata(session: dict) -> dict:
 
 
 def embed_session(session: dict) -> None:
-    """将 session 写入向量库（upsert，插入与更新均适用）。"""
     try:
         text = _build_embed_text(session)
         if not text.strip():
@@ -97,7 +94,6 @@ def delete_embedding(session_id: str) -> None:
 
 
 def index_existing_finals() -> int:
-    """将尚未入库的 Final 记录批量写入向量库，返回新增数量。"""
     db     = load_db()
     finals = [s for s in db if s.get("status") == "final"]
     if not finals:
@@ -110,9 +106,6 @@ def index_existing_finals() -> int:
 
 
 def _ensure_indexed() -> None:
-    """应用启动时调用，补全历史 Final 记录的向量索引。
-    若检测到 metadata schema 升级（缺少 content_time_num），自动全量重建。
-    """
     if st.session_state.get("_vector_db_ready"):
         return
     st.session_state["_vector_db_ready"] = True

@@ -3,16 +3,16 @@ from __future__ import annotations
 
 import streamlit as st
 
-from ..constants import COLS
-from ..db import load_db
-from ..vector_db import _get_collection, _get_embedder
-from ..llm import (
+from core.constants import COLS
+from core.db_manager import (
+    load_db,
     get_llm_providers, get_llm_models,
     add_llm_provider, remove_llm_provider, update_llm_provider,
     add_llm_model, remove_llm_model, update_llm_model,
-    call_llm, call_llm_with_config,
 )
-from .components import _render_card, _render_detail
+from core.llm_client import call, call_with_config
+from core.vector_db import _get_collection, _get_embedder
+from components.cards import _render_card, _render_detail
 
 
 # ─── 搜索结果渲染 ────────────────────────────────────────────────────────────
@@ -105,9 +105,11 @@ def _render_date_filter() -> None:
     st.divider()
     st.markdown(f"### 📅 精确日期匹配（{len(exact_data)} 条）")
     if exact_data:
-        sorted_data = sorted(exact_data,
-                             key=lambda x: x[1].get("content_time_num", 0),
-                             reverse=True)
+        sorted_data = sorted(
+            exact_data,
+            key=lambda x: x[1].get("content_time_num", 0),
+            reverse=True,
+        )
         _render_search_results([(sid, None) for sid, _ in sorted_data], "search_selected")
     else:
         st.caption(f"该日期范围（{start_str} 至 {end_str}）内无精确日期记录")
@@ -116,6 +118,40 @@ def _render_date_filter() -> None:
         st.divider()
         with st.expander(f"⚠️ 以下 {len(fuzzy_ids)} 条记录使用了模糊时间描述，无法按日期过滤"):
             _render_search_results([(sid, None) for sid in fuzzy_ids], "search_selected")
+
+    # ── 阶段回忆录 ──────────────────────────────────────────────────────────
+    model_id = st.session_state.get("llm_selected_model") or ""
+    if exact_data and model_id:
+        st.divider()
+        st.markdown("### 📖 阶段回忆录")
+        st.caption(f"基于上方 {len(exact_data)} 条精确匹配记录生成叙事文章")
+        cache_key = f"_period_story_{start_str}_{end_str}"
+        cached    = st.session_state.get(cache_key)
+        if cached:
+            st.markdown(cached)
+            if st.button("🔄 重新生成", key="regen_period_story"):
+                del st.session_state[cache_key]
+                st.rerun()
+        else:
+            if st.button(
+                "✨ 生成阶段回忆录", key="gen_period_story", type="primary"
+            ):
+                from core.db_manager import get_session
+                from skills.story_skill import StorySkill
+                sessions = [
+                    s for sid, _ in sorted_data
+                    if (s := get_session(sid)) is not None
+                ]
+                period_label = f"{start_str} 至 {end_str}"
+                with st.spinner("生成中，请稍候…"):
+                    result = StorySkill().run_period(
+                        sessions, period_label, model_id=model_id
+                    )
+                if result.success:
+                    st.session_state[cache_key] = result.data["story"]
+                    st.rerun()
+                else:
+                    st.error(f"生成失败：{result.error}")
 
 
 # ─── 语义检索 ─────────────────────────────────────────────────────────────────
@@ -183,9 +219,7 @@ def _render_semantic_search() -> None:
 
 # ─── LLM 配置管理面板 ────────────────────────────────────────────────────────
 
-_TEST_MESSAGE = (
-    "这是一个测试字段，来自于MyPresent项目，收到后请回复 你好MyPresent"
-)
+_TEST_MESSAGE = "这是一个测试字段，来自于MyPresent项目，收到后请回复 你好MyPresent"
 
 
 def _clear_draft() -> None:
@@ -195,16 +229,15 @@ def _clear_draft() -> None:
 
 
 def _enter_draft(provider: dict, model: dict) -> None:
-    st.session_state["_draft_provider"]   = provider
-    st.session_state["_draft_model"]      = model
-    st.session_state["_test_result"]      = None
+    st.session_state["_draft_provider"]    = provider
+    st.session_state["_draft_model"]       = model
+    st.session_state["_test_result"]       = None
     st.session_state["_draft_test_passed"] = False
-    st.session_state["_editing_pvd"]      = None
-    st.session_state["_editing_mdl"]      = None
+    st.session_state["_editing_pvd"]       = None
+    st.session_state["_editing_mdl"]       = None
 
 
 def _render_llm_settings() -> None:
-    """Provider + Model 增删改管理，新增/修改均需测试后确认。"""
     providers   = get_llm_providers()
     models      = get_llm_models()
     pvd_map     = {p["id"]: p["name"] for p in providers}
@@ -213,12 +246,10 @@ def _render_llm_settings() -> None:
     test_result = st.session_state.get("_test_result")
     test_passed = st.session_state.get("_draft_test_passed", False)
 
-    # ── 已有 Provider 列表 ──────────────────────────────────────────────
     st.markdown("**🔌 API Provider**")
     if providers:
         for p in providers:
             if st.session_state.get("_confirm_edit_pvd") == p["id"]:
-                # 步骤1：确认警告
                 with st.container(border=True):
                     st.warning(
                         f"修改 `{p['name']}` 的配置后需要**重新测试**（会消耗少量 token），确认继续？"
@@ -234,7 +265,6 @@ def _render_llm_settings() -> None:
                             st.session_state["_confirm_edit_pvd"] = None
                             st.rerun()
             elif st.session_state.get("_editing_pvd") == p["id"]:
-                # 步骤2：编辑表单（保存后进测试模式）
                 with st.container(border=True):
                     ep_name = st.text_input("名称", value=p["name"], key=f"ep_name_{p['id']}")
                     ep_url  = st.text_input("Base URL", value=p["base_url"], key=f"ep_url_{p['id']}")
@@ -282,14 +312,13 @@ def _render_llm_settings() -> None:
 
     st.divider()
 
-    # ── 已有 Model 列表 ────────────────────────────────────────────────
     st.markdown("**🤖 已保存模型**")
     if models:
         for m in models:
             if st.session_state.get("_confirm_edit_mdl") == m["id"]:
                 with st.container(border=True):
                     st.warning(
-                        f"修改模型 `{m['display_name']}` 后需要**重新测试**（会消耗少量 token），确认继续？"
+                        f"修改模型 `{m['display_name']}` 后需要**重新测试**，确认继续？"
                     )
                     cc1, cc2 = st.columns(2)
                     with cc1:
@@ -313,10 +342,10 @@ def _render_llm_settings() -> None:
                                 _enter_draft(
                                     provider={**pvd, "_id": pvd["id"], "_readonly": True},
                                     model={
-                                        "name": em_name.strip(),
+                                        "name":         em_name.strip(),
                                         "display_name": em_disp.strip() or em_name.strip(),
-                                        "_id": m["id"],
-                                        "provider_id": m["provider_id"],
+                                        "_id":          m["id"],
+                                        "provider_id":  m["provider_id"],
                                     },
                                 )
                                 st.rerun()
@@ -347,11 +376,14 @@ def _render_llm_settings() -> None:
     else:
         st.caption("暂无已保存模型。")
 
-    # 为已有 Provider 追加模型（Provider 已验证，直接保存）
     if providers and not draft_pvd:
         with st.expander("➕ 为已有 Provider 追加模型"):
-            nm_pvd  = st.selectbox("所属 Provider", options=[p["id"] for p in providers],
-                                   format_func=lambda pid: pvd_map.get(pid, pid), key="nm_pvd")
+            nm_pvd  = st.selectbox(
+                "所属 Provider",
+                options=[p["id"] for p in providers],
+                format_func=lambda pid: pvd_map.get(pid, pid),
+                key="nm_pvd",
+            )
             nm_name = st.text_input("模型 ID", key="nm_name", placeholder="gpt-4o-mini")
             nm_disp = st.text_input("显示名称（留空同模型 ID）", key="nm_disp",
                                     placeholder="GPT-4o Mini")
@@ -370,7 +402,6 @@ def _render_llm_settings() -> None:
 
     st.divider()
 
-    # ── 测试 / 新增配置区 ───────────────────────────────────────────────
     if draft_pvd and draft_mdl:
         is_edit_pvd = "_id" in draft_pvd and not draft_pvd.get("_readonly")
         is_edit_mdl = "_id" in draft_mdl and not draft_mdl.get("_readonly")
@@ -389,11 +420,11 @@ def _render_llm_settings() -> None:
                 if st.button("▶ 发送测试", key="draft_send_btn", type="primary"):
                     with st.spinner("调用中…"):
                         try:
-                            reply = call_llm_with_config(
+                            reply = call_with_config(
                                 [{"role": "user", "content": _TEST_MESSAGE}],
                                 draft_mdl, draft_pvd,
                             )
-                            st.session_state["_test_result"]      = {"reply": reply}
+                            st.session_state["_test_result"]       = {"reply": reply}
                             st.session_state["_draft_test_passed"] = True
                             st.rerun()
                         except Exception as e:
@@ -482,7 +513,6 @@ def _render_llm_settings() -> None:
 def _render_qa() -> None:
     models = get_llm_models()
 
-    # ── 配置管理面板（有模型时默认折叠） ────────────────────────────────────
     with st.expander("⚙️ 模型与 API 配置", expanded=not models):
         _render_llm_settings()
 
@@ -490,16 +520,15 @@ def _render_qa() -> None:
         st.info("请先在上方「模型与 API 配置」中添加 Provider 和模型。")
         return
 
-    # ── 模型选择 + 清空按钮（同行） ─────────────────────────────────────────
-    model_ids = [m["id"] for m in models]
-    cur_model = st.session_state.get("llm_selected_model")
+    model_ids   = [m["id"] for m in models]
+    cur_model   = st.session_state.get("llm_selected_model")
     if cur_model not in model_ids:
         cur_model = model_ids[0]
         st.session_state["llm_selected_model"] = cur_model
 
-    providers   = get_llm_providers()
-    pvd_name    = {p["id"]: p["name"] for p in providers}
-    mdl_label   = {
+    providers = get_llm_providers()
+    pvd_name  = {p["id"]: p["name"] for p in providers}
+    mdl_label = {
         m["id"]: f"{pvd_name.get(m['provider_id'], '?')}  ·  {m['display_name']}"
         for m in models
     }
@@ -523,7 +552,6 @@ def _render_qa() -> None:
             st.session_state["llm_chat_history"] = []
             st.rerun()
 
-    # ── 对话气泡（固定高度滚动区，消息始终可见） ─────────────────────────────
     history = st.session_state.get("llm_chat_history", [])
     with st.container(height=460, border=True):
         if not history:
@@ -532,7 +560,6 @@ def _render_qa() -> None:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-    # ── 输入框（Streamlit 自动固定在页面底部） ───────────────────────────────
     user_input = st.chat_input("输入问题…")
 
     if user_input and user_input.strip():
@@ -543,8 +570,8 @@ def _render_qa() -> None:
         model_id = st.session_state.get("llm_selected_model")
         with st.spinner("思考中…"):
             try:
-                reply = call_llm(history, model_id)
-                history.append({"role": "assistant", "content": reply})
+                reply = call(history, model_id)
+                history.append({"role": "assistant", "content": str(reply)})
                 st.session_state["llm_chat_history"] = history
                 st.rerun()
             except Exception as e:

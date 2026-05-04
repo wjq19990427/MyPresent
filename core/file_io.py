@@ -7,13 +7,14 @@ from pathlib import Path
 
 from .constants import (
     FINAL_DIR, PENDING_DIR, FIELD_SCHEMA,
-    IMAGE_EXTS, VIDEO_EXTS,
+    IMAGE_EXTS, VIDEO_EXTS, VECTOR_DB_DIR,
 )
-from .db import load_db, save_db, _make_session
+from .db_manager import (
+    create_session, set_session_status, update_session_files, get_session,
+)
 
 
 def _file_subdir(filename: str) -> str:
-    """根据扩展名返回子目录名：images / videos / text。"""
     ext = Path(filename).suffix.lower()
     if ext in IMAGE_EXTS:
         return "images"
@@ -23,7 +24,6 @@ def _file_subdir(filename: str) -> str:
 
 
 def _session_file_type(session: dict) -> str:
-    """返回 session 主文件的类型，用于文件类型筛选。"""
     files = session.get("files", [])
     if not files:
         return "text"
@@ -31,7 +31,6 @@ def _session_file_type(session: dict) -> str:
 
 
 def ensure_dirs() -> None:
-    from .constants import VECTOR_DB_DIR
     for base in (FINAL_DIR, PENDING_DIR):
         for sub in ("images", "videos", "text"):
             (base / sub).mkdir(parents=True, exist_ok=True)
@@ -41,9 +40,6 @@ def ensure_dirs() -> None:
 def _write_files(
     file_data_list: list[tuple], dest_dir: Path, session_id: str
 ) -> list[dict]:
-    """data 可以是 bytes 或 file-like 对象（大文件流式写入）。
-    文件按类型自动存入 images / videos / text 子目录。
-    """
     entries = []
     for idx, (data, orig_name) in enumerate(file_data_list):
         filename = f"{session_id}_{idx:03d}_{orig_name}"
@@ -65,9 +61,10 @@ def _write_files(
 
 def _write_md(session: dict) -> None:
     """生成/更新 Final 目录中该 session 的 .md 文件。"""
-    title = session["files"][0]["original_name"] if session["files"] else "记录"
-    if len(session["files"]) > 1:
-        title += f" 等 {len(session['files'])} 个文件"
+    files = session.get("files", [])
+    title = files[0]["original_name"] if files else "记录"
+    if len(files) > 1:
+        title += f" 等 {len(files)} 个文件"
 
     lines = [f"# {title}\n\n"]
     lines.append(f"**上传时间**：{session.get('upload_time', '')}\n")
@@ -84,7 +81,9 @@ def _write_md(session: dict) -> None:
     if comments:
         lines.append("---\n\n## 评论区\n\n")
         for c in comments:
-            lines.append(f"**{c.get('created_at', '')}**\n\n{c.get('text', '')}\n\n")
+            lines.append(
+                f"**{c.get('created_at', '')}**\n\n{c.get('text', '')}\n\n"
+            )
 
     history = session.get("edit_history", [])
     if history:
@@ -92,8 +91,12 @@ def _write_md(session: dict) -> None:
         for edit in history:
             lines.append(f"### {edit['edited_at']}\n\n")
             for fk, change in edit["changes"].items():
-                lbl = next((f["label"] for f in FIELD_SCHEMA if f["key"] == fk), fk)
-                lines.append(f"- **{lbl}**：「{change['from']}」→「{change['to']}」\n")
+                lbl = next(
+                    (f["label"] for f in FIELD_SCHEMA if f["key"] == fk), fk
+                )
+                lines.append(
+                    f"- **{lbl}**：「{change['from']}」→「{change['to']}」\n"
+                )
             lines.append("\n")
 
     (FINAL_DIR / f"{session['session_id']}.md").write_text(
@@ -102,42 +105,40 @@ def _write_md(session: dict) -> None:
 
 
 def save_session_pending(
-    file_data_list: list[tuple], source_type: str, field_values: dict,
+    file_data_list: list[tuple],
+    source_type: str,
+    field_values: dict,
     tags: list[str] | None = None,
 ) -> None:
-    from .vector_db import embed_session  # noqa: F401 (import kept local to avoid circular at module load)
     sid          = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_entries = _write_files(file_data_list, PENDING_DIR, sid)
-    session      = _make_session(sid, file_entries, source_type, field_values, tags=tags)
-    db = load_db()
-    db.append(session)
-    save_db(db)
+    create_session(sid, file_entries, source_type, field_values, tags=tags)
 
 
 def save_session_final(
-    file_data_list: list[tuple], source_type: str, field_values: dict,
+    file_data_list: list[tuple],
+    source_type: str,
+    field_values: dict,
     tags: list[str] | None = None,
 ) -> None:
     from .vector_db import embed_session
     sid          = datetime.now().strftime("%Y%m%d_%H%M%S")
     file_entries = _write_files(file_data_list, FINAL_DIR, sid)
-    session      = _make_session(sid, file_entries, source_type, field_values, tags=tags)
-    session["status"]       = "final"
-    session["archive_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    session["is_complete"]  = True
-    db = load_db()
-    db.append(session)
-    save_db(db)
+    now          = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    session      = create_session(
+        sid, file_entries, source_type, field_values,
+        tags=tags, status="final", archive_time=now,
+    )
     _write_md(session)
     embed_session(session)
 
 
 def move_to_final(session_id: str) -> None:
     from .vector_db import embed_session
-    db      = load_db()
-    session = next((s for s in db if s["session_id"] == session_id), None)
+    session = get_session(session_id)
     if not session:
         return
+    updated_files = []
     for fe in session["files"]:
         src  = Path(fe["path"])
         sub  = _file_subdir(fe["filename"])
@@ -145,24 +146,29 @@ def move_to_final(session_id: str) -> None:
         dest.parent.mkdir(parents=True, exist_ok=True)
         if src.exists():
             shutil.move(str(src), str(dest))
-        fe["path"] = str(dest)
-    session["status"]       = "final"
-    session["archive_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    session["is_complete"]  = True
-    save_db(db)
-    _write_md(session)
-    embed_session(session)
+        updated_files.append({
+            "filename":      fe["filename"],
+            "original_name": fe["original_name"],
+            "path":          str(dest),
+        })
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    update_session_files(session_id, updated_files)
+    set_session_status(session_id, "final", archive_time=now, is_complete=1)
+    updated_session = get_session(session_id)
+    if updated_session:
+        _write_md(updated_session)
+        embed_session(updated_session)
 
 
 def import_folder_to_pending(
-    file_paths: list[Path], as_one_session: bool, tags: list[str] | None = None
+    file_paths: list[Path],
+    as_one_session: bool,
+    tags: list[str] | None = None,
 ) -> int:
-    """将本地文件夹中的文件导入为 pending session，返回创建的 session 数量。"""
     if not file_paths:
         return 0
     if as_one_session:
-        handles = []
-        file_data = []
+        handles, file_data = [], []
         try:
             for fp in file_paths:
                 fh = open(fp, "rb")

@@ -5,11 +5,10 @@ from datetime import datetime
 
 import streamlit as st
 
-from ..constants import FIELD_SCHEMA
+from core.constants import FIELD_SCHEMA
 
 
 def _render_date_or_text(field: dict, prefix: str, default: str = "") -> str:
-    """渲染日历选取 + 自由输入双控件，自由输入优先。"""
     default_date = None
     default_free = default
     if default:
@@ -41,9 +40,7 @@ def render_field_inputs(
     defaults: dict | None = None,
     skip_keys: set | None = None,
 ) -> dict:
-    """根据 FIELD_SCHEMA 渲染所有字段，返回 {key: value}。
-    skip_keys 中的字段不渲染控件，但其已有值仍保留在返回值中。
-    """
+    """根据 FIELD_SCHEMA 渲染所有字段，返回 {key: value}。"""
     defaults         = defaults or {}
     skip_keys        = skip_keys or set()
     values           = {}
