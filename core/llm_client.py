@@ -1,6 +1,7 @@
 """统一 LLM 调用层：JSON 校验、自动重试、调用日志。
 
 对外接口：
+  call_llm(system_prompt, user_prompt, *, model_id, expect_json, skill_name, session_id) -> str | dict
   call(messages, model_id, *, expect_json, skill_name, session_id) -> str | dict
   call_with_config(messages, model, provider) -> str   # 用于连通性测试
 """
@@ -13,6 +14,10 @@ from .db_manager import (
     get_llm_models, get_llm_providers,
     log_llm_call,
 )
+
+
+class LLMJsonParseError(ValueError):
+    """LLM 返回内容无法解析为合法 JSON 时抛出。"""
 
 
 def call(
@@ -136,14 +141,45 @@ def _do_call(messages: list[dict], model: dict, provider: dict) -> str:
     raise NotImplementedError(f"暂不支持框架：{framework}")
 
 
+def call_llm(
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    model_id: str,
+    expect_json: bool = True,
+    skill_name: str = "",
+    session_id: str = "",
+) -> "str | dict":
+    """简化调用接口：直接传入 system/user prompt 字符串。
+
+    等价于 call([system, user], model_id, ...)，供 Skill 层优先使用。
+    expect_json=True 时，JSON 解析失败抛出 LLMJsonParseError。
+    """
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_prompt})
+    try:
+        return call(
+            messages,
+            model_id=model_id,
+            expect_json=expect_json,
+            skill_name=skill_name,
+            session_id=session_id,
+        )
+    except ValueError as exc:
+        if expect_json and "JSON 解析失败" in str(exc):
+            raise LLMJsonParseError(str(exc)) from exc
+        raise
+
+
 def _parse_json(text: str) -> dict:
     """从 LLM 输出中提取 JSON 对象，容忍 markdown 代码块包裹。"""
     text = text.strip()
-    # 去掉 ```json ... ``` 包裹
     if text.startswith("```"):
         lines = text.splitlines()
         text  = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
     try:
         return json.loads(text)
     except json.JSONDecodeError as e:
-        raise ValueError(f"JSON 解析失败：{e}") from e
+        raise LLMJsonParseError(f"JSON 解析失败：{e}") from e

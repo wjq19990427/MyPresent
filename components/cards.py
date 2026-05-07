@@ -19,6 +19,7 @@ from core.db_manager import (
 from core.file_io import _write_md, move_to_final
 from core.media import video_thumbnail, pil_to_png_bytes
 from components.forms import render_field_inputs
+from components.ai_tagging import render_ai_tag_picker
 
 
 # ─── 缩略图 ─────────────────────────────────────────────────────────────────────
@@ -230,9 +231,13 @@ def _render_detail(
                     st.markdown(f"- **{lbl}**：「{change['from']}」→「{change['to']}」")
                 st.divider()
 
-    safe_sid    = "".join(c if c.isalnum() else "_" for c in sid)
-    edit_prefix = f"edit_{safe_sid}"
-    skip_keys   = {"description"} if is_text else set()
+    safe_sid         = "".join(c if c.isalnum() else "_" for c in sid)
+    edit_prefix      = f"edit_{safe_sid}"
+    skip_keys        = {"description"} if is_text else set()
+    ai_picker_key    = f"ai_tags_{sid}"
+    tags_widget_key  = f"tags_{safe_sid}"
+    # AI 标签组件应用过来的标签（点击「应用到标签栏」后写入）
+    ai_applied_tags  = st.session_state.get(f"_ai_applied_tags_{ai_picker_key}", [])
 
     text_file_path    = None
     current_text_body = ""
@@ -264,16 +269,25 @@ def _render_detail(
 
         st.divider()
         st.markdown("**🏷️ 标签**（可多选，不计入编辑历史）")
-        all_tags    = get_tags_registry()
-        extra_tags  = [t for t in session.get("tags", []) if t not in all_tags]
-        tag_options = all_tags + extra_tags
+        all_tags     = get_tags_registry()
+        # AI 新生成的标签（不在注册表中）也作为可选项临时加入
+        ai_new_tags  = [t for t in ai_applied_tags if t not in all_tags]
+        extra_tags   = [t for t in session.get("tags", []) if t not in all_tags]
+        tag_options  = all_tags + extra_tags + ai_new_tags
+        # 合并现有标签 + AI 应用标签作为默认勾选
+        merged_default = list(dict.fromkeys(
+            [t for t in session.get("tags", []) if t in tag_options] +
+            [t for t in ai_applied_tags if t in tag_options]
+        ))
         selected_tags = st.multiselect(
             "标签",
             options=tag_options,
-            default=[t for t in session.get("tags", []) if t in tag_options],
-            key=f"tags_{safe_sid}",
+            default=merged_default,
+            key=tags_widget_key,
             label_visibility="collapsed",
         )
+        if ai_applied_tags:
+            st.caption("💡 已含 AI 推荐标签，保存时新标签将自动注册到标签库。")
 
         groups = get_groups()
         if groups:
@@ -323,6 +337,11 @@ def _render_detail(
                 text_file_path.write_text(text_body, encoding="utf-8")
             except OSError as e:
                 st.error(f"文件写入失败：{e}")
+        # 将 AI 新生成、不在注册表中的标签自动注册
+        existing_reg = get_tags_registry()
+        for t in selected_tags:
+            if t not in existing_reg:
+                add_tag(t)
         field_values["tags"]      = selected_tags
         field_values["group_ids"] = selected_gids
         update_session_fields(sid, field_values)
@@ -341,6 +360,10 @@ def _render_detail(
                 except OSError as e:
                     st.error(f"文件写入失败：{e}")
                     st.stop()
+            existing_reg = get_tags_registry()
+            for t in selected_tags:
+                if t not in existing_reg:
+                    add_tag(t)
             field_values["tags"]      = selected_tags
             field_values["group_ids"] = selected_gids
             update_session_fields(sid, field_values)
@@ -349,6 +372,13 @@ def _render_detail(
             st.rerun()
 
     if mode == "final":
+        model_id = st.session_state.get("llm_selected_model") or ""
+        render_ai_tag_picker(
+            session_data=session,
+            model_id=model_id,
+            state_key=ai_picker_key,
+            apply_key=tags_widget_key,
+        )
         _render_ai_summary(session)
 
     st.divider()
