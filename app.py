@@ -21,7 +21,7 @@ def main() -> None:
     init_state()
     _ensure_indexed()
 
-    st.title("🗂️ 灵感记录工具")
+    st.title("🗂️ MyPresent 智能个人记录整理助手")
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "🗂️ 记录舱（上传）",
         "🖼️ 灵感墙（待处理）",
