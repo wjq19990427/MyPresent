@@ -110,7 +110,7 @@ def save_session_pending(
     field_values: dict,
     tags: list[str] | None = None,
 ) -> None:
-    sid          = datetime.now().strftime("%Y%m%d_%H%M%S")
+    sid          = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     file_entries = _write_files(file_data_list, PENDING_DIR, sid)
     create_session(sid, file_entries, source_type, field_values, tags=tags)
 
@@ -122,7 +122,7 @@ def save_session_final(
     tags: list[str] | None = None,
 ) -> None:
     from .vector_db import embed_session
-    sid          = datetime.now().strftime("%Y%m%d_%H%M%S")
+    sid          = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     file_entries = _write_files(file_data_list, FINAL_DIR, sid)
     now          = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     session      = create_session(
