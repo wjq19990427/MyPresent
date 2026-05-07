@@ -6,7 +6,7 @@ from pathlib import Path
 import streamlit as st
 
 from core.constants import TEXT_EXTS, SUPPORTED_IMPORT_EXTS, FIELD_SCHEMA
-from core.db_manager import get_tags_registry, validate_session
+from core.db_manager import get_tags_registry, validate_session, add_tag
 from core.file_io import save_session_pending, save_session_final, import_folder_to_pending
 from components.forms import render_field_inputs
 from skills.tagging_skill import auto_tag_session
@@ -190,15 +190,18 @@ def render_upload_tab() -> None:
             "✨ AI",
             key="upload_ai_tag_btn",
             disabled=not ai_ready,
-            help="在「搜索」Tab 选择模型后可自动推荐标签" if not ai_ready else "AI 推荐标签",
+            help="在「运行看板」Tab 选择模型后可自动推荐标签" if not ai_ready else "AI 推荐标签",
         ):
             with st.spinner("AI 推荐标签中…"):
                 suggestions = auto_tag_session(
                     {"description": auto_description, "feeling": ""},
                     model_id=model_id,
                 )
-            if suggestions:
-                st.session_state[f"upload_tags_{st.session_state.upload_key}"] = suggestions
+            combined = suggestions["suggested_tags"] + suggestions["new_tags"]
+            if combined:
+                for tag in suggestions["new_tags"]:
+                    add_tag(tag)
+                st.session_state[f"upload_tags_{st.session_state.upload_key}"] = combined
                 st.rerun()
             else:
                 st.warning("未能推荐到标签，请手动选择")
