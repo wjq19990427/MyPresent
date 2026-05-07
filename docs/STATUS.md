@@ -18,7 +18,9 @@
 
 ## 当前焦点
 
-- Codex 协作上线：`AGENTS.md` 实现工身份 + `docs/tasks/_template.md` 任务卡模板；下一步发首张实际任务卡
+- **task-1 已派发**：`docs/tasks/task-1.md` — AI 应用标签时立即入库（首次试跑 Codex 协作流程）
+- 待 Codex 实现 → 架构师 Review → 你 merge
+- 下一步任务卡候选：tab_upload 「✨ AI」按钮双重 bug（dict-vs-list + 不入库）
 - 已知技术债：`tab_search` 跨层调用 `vector_db._get_*`；pending 孤儿行无清理脚本；`FIELD_SCHEMA` 增字段需手改 5 处
 
 ## 最近完成
