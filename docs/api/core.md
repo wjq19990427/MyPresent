@@ -1,0 +1,396 @@
+# core/ — 基础设施
+
+> 项目最底层。零业务逻辑，仅提供 DB / LLM / 向量 / 文件 / 媒体 / 状态 / 常量。
+
+## 边界规则
+
+- core/ **不得** import `skills/` 或 `components/`
+- core/ 内部禁止循环依赖
+
+## 子模块清单
+
+| 文件 | 职责 | 契约状态 |
+|------|------|----------|
+| `db_manager.py` | SQLite 连接 + CRUD 封装 | ✅ |
+| `llm_client.py` | LLM 统一调用层（JSON 重试 + llm_logs 写库） | ✅ |
+| `vector_db.py` | ChromaDB + BGE embedding | ✅ |
+| `prompts.py` | System Prompts 集中存放 | ✅ |
+| `file_io.py` | 文件写入 / 移动 / Markdown 导出 | ✅ |
+| `media.py` | 视频缩略图 / 图像格式转换 | ✅ |
+| `state.py` | Streamlit `session_state` 初始化 | ✅ |
+| `constants.py` | `FIELD_SCHEMA` + 全部常量 | ✅ |
+
+> ⬜ 未填 · 🟡 部分 · ✅ 完整。模板见 [`_TEMPLATE.md`](_TEMPLATE.md)
+
+---
+
+## db_manager.py
+
+> SQLite 主库的唯一访问层。Schema 详见 [`database.md`](database.md)。
+> 上层禁止直接 `sqlite3.connect`——一律通过此模块。
+
+### 初始化
+
+#### `init_db() -> None`
+- **用途**：创建库 + 全部表（如不存在）+ 灌入 `DEFAULT_TAGS`
+- **副作用**：写 `data/database.db`；幂等
+- **调用时机**：`app.py` 启动 / `migrate.py`
+
+### Session CRUD
+
+#### `load_db() -> list[dict]`
+- **返回**：所有 session（按 `upload_time DESC`），每条含 `files / tags / group_ids / edit_history / comments`
+- **副作用**：无
+
+#### `get_session(session_id: str) -> dict | None`
+- **返回**：单条 session 完整 dict，未找到返回 `None`
+
+#### `create_session(session_id, file_entries, source_type, field_values, tags=None, status='pending', archive_time='') -> dict`
+- **副作用**：插入 `sessions` + `session_files` + `session_tags`；自动计算 `is_complete`
+- **返回**：完整 session dict
+- **异常**：违反 NOT NULL 约束时抛 `sqlite3.IntegrityError`
+
+#### `update_session_fields(session_id, new_values: dict) -> None`
+- **入参**：`new_values` 可含 `FIELD_SCHEMA` 字段 + 可选 `tags` / `group_ids`
+- **副作用**：
+  - Final 记录额外写 `edit_history`（仅业务字段，标签/分组不计）
+  - Final 记录会**重写 `.md`** 并**重新 embed**（隐式调 `file_io._write_md` + `vector_db.embed_session`）
+- **不变量**：纯文字 session 跳过 `description` 的 diff（避免误记历史）
+
+#### `update_session_tags(session_id, tags: list[str]) -> None`
+- **副作用**：替换 `session_tags`；Final 记录会重新 embed（**不**写 `.md`，**不**记历史）
+
+#### `update_session_groups(session_id, group_ids: list[str]) -> None`
+- **副作用**：替换 `session_groups`；不触发 embed/md/历史
+
+#### `update_session_files(session_id, file_entries: list[dict]) -> None`
+- **副作用**：整体替换 `session_files`（用于 `move_to_final` 路径迁移）
+
+#### `set_session_status(session_id, status, archive_time='', is_complete=1) -> None`
+- **副作用**：更新 `sessions` 三个字段；不触发任何 hook
+
+### 校验
+
+#### `validate_session(session: dict) -> list[str]`
+- **返回**：未填写的必填项 **label** 列表（不是 key）；空 = 全部完整
+- **副作用**：无
+
+### Comments
+
+#### `add_comment(session_id, text: str) -> None`
+- **副作用**：插入 `comments`；Final 记录重写 `.md`；空文本静默忽略
+
+#### `delete_comment(session_id, comment_id: str) -> None`
+- **副作用**：删行；Final 记录重写 `.md`
+
+### Tags Registry
+
+- `get_tags_registry() -> list[str]` ：按 name 升序
+- `add_tag(name: str) -> None` ：`INSERT OR IGNORE`，空字符串忽略
+- `remove_tag(name: str) -> None` ：默认标签也能删（保护逻辑在 UI 层）
+
+### Groups
+
+- `get_groups() -> list[dict]` ：按 created_at 升序
+- `create_group(name: str) -> str` ：返回 `grp_*` ID；空名返回 `''`
+- `delete_group(group_id: str) -> None` ：级联删 `session_groups`
+
+### LLM Providers / Models
+
+| 函数 | 副作用 / 异常 |
+|------|--------------|
+| `get_llm_providers() -> list[dict]` | 按 name 升序 |
+| `add_llm_provider(name, base_url, api_key, framework='openai') -> str` | 三项必填，否则 `ValueError`；`base_url` 自动去尾 `/` |
+| `remove_llm_provider(provider_id) -> None` | 级联删 `llm_models` |
+| `update_llm_provider(provider_id, **kwargs) -> None` | 仅接受 `name/base_url/api_key/framework`，其余忽略 |
+| `get_llm_models() -> list[dict]` | 按 name 升序 |
+| `add_llm_model(model_name, provider_id, display_name='') -> str` | 校验 provider 存在，否则 `ValueError` |
+| `remove_llm_model(model_id) -> None` | 不影响 `llm_logs`（无 FK） |
+| `update_llm_model(model_id, **kwargs) -> None` | 仅接受 `name/display_name` |
+
+### LLM Logs
+
+#### `log_llm_call(model_id='', skill_name='', session_id='', prompt_tokens=0, completion_tokens=0, latency_ms=0, success=True, error_message='') -> None`
+- **副作用**：插入 `llm_logs`；空字符串自动转 `NULL`
+- **调用方**：通常由 `llm_client.call()` 自动调用，业务代码勿手动调
+
+#### `get_llm_logs(limit: int = 200) -> list[dict]`
+- **返回**：按 id 倒序，最新在前
+
+### 不变量
+
+- 所有公开函数自管事务（`_conn()` 上下文）；异常自动 rollback
+- Final 记录的字段更新会**自动**触发 `.md` 重写 + embedding 重建——上层无需手动同步
+- `_conn()` / `_load_aux()` / `_row_to_dict()` / `_missing_fields()` / `_is_text_session()` 为内部函数，禁止外部 import
+
+---
+
+## llm_client.py
+
+> 所有 LLM 调用的唯一入口。Skill 层禁止直接起 SDK 客户端。
+
+### 公开 API
+
+#### `call_llm(system_prompt, user_prompt, *, model_id, expect_json=True, skill_name='', session_id='') -> str | dict`
+- **用途**：Skill 层首选接口。把 system + user 拼成 messages 后转发给 `call()`
+- **返回**：
+  - `expect_json=False` → `str`
+  - `expect_json=True`  → `dict`（解析后的 JSON）
+- **异常**：
+  - JSON 解析失败 → `LLMJsonParseError`（`ValueError` 子类）
+  - 模型/Provider 未找到 → `ValueError`
+  - 底层 SDK 异常（网络/认证）→ 原样冒泡
+- **副作用**：自动写 `llm_logs`（成功/失败均写）
+
+#### `call(messages: list[dict], model_id: str, *, expect_json=False, skill_name='', session_id='', max_retries=2) -> str | dict`
+- **用途**：底层调用入口。给需要自定义 multi-turn messages 的场景使用
+- **JSON 重试机制**：`expect_json=True` 时若解析失败，把原始输出 + 重试提示追加到 messages 重发，最多 `max_retries` 次
+- **副作用**：写 `llm_logs`；成功只写一次（最终成功时刻）；失败写一次（最后一次失败）
+- **不变量**：`max_retries=2` 表示最多调 LLM **3 次**（首次 + 2 次重试）
+
+#### `call_with_config(messages: list[dict], model: dict, provider: dict) -> str`
+- **用途**：新增配置前的连通性测试。绕过 DB 查找，直接用临时 dict 调用
+- **副作用**：**不写 `llm_logs`**（测试不污染日志）
+- **返回**：纯文本 raw 输出
+- **异常**：`NotImplementedError` 当 framework 不是 `'openai'`
+
+### 异常类型
+
+#### `LLMJsonParseError(ValueError)`
+- LLM 返回内容无法解析为 JSON 时抛出
+- 调用方用 `try/except LLMJsonParseError` 单独捕获以区分「调用失败」vs「输出格式错」
+
+### 不变量
+
+- 所有公开调用都依赖 `db_manager.get_llm_models()` / `get_llm_providers()`——必须先在 SQLite 里有配置
+- 仅 `framework='openai'` 框架已实现；扩展点保留在 `_do_call()` 内
+- `_do_call()` / `_parse_json()` 为内部函数，禁止外部 import
+- `_parse_json()` 容忍 markdown 代码块包裹（` ```json ... ``` `自动剥离）
+
+### 已知陷阱
+
+- `call_with_config` 不写日志 ≠ 永远不出现在看板。某些早期代码可能残留直接走 `call()` 做测试，会污染日志——新代码一律用 `call_with_config`
+- `expect_json=True` 时，重试会让 messages 越来越长（追加 assistant 输出 + user 提示），可能撞上 context window；2 次重试是经验上限，不要轻易调高
+
+---
+
+## vector_db.py
+
+> ChromaDB（cosine）+ BGE 中文 embedding。所有公开 API **静默吞异常**——搜索功能可降级，主流程不阻断。
+
+### 公开 API
+
+#### `embed_session(session: dict) -> None`
+- **用途**：把 session 的可索引字段（`content_time / description / feeling / reason / tags`）upsert 进向量库
+- **副作用**：写 `vector_db/`；任何异常静默吞掉（不抛、不日志）
+- **不变量**：embedding 文本为空时静默跳过；`session["session_id"]` 必须存在
+- **被谁调用**：`db_manager.update_session_fields` / `update_session_tags` / `file_io.save_session_final` / `file_io.move_to_final`
+
+#### `delete_embedding(session_id: str) -> None`
+- **副作用**：从向量库删条目；异常静默吞
+
+#### `index_existing_finals() -> int`
+- **用途**：批量补全所有 Final 记录的索引（启动检查 / 手动重建）
+- **返回**：本次新增索引的条数（已存在不重复）
+
+### 半公开（仅 `app.py` / `core/state` 链上调用）
+
+#### `_ensure_indexed() -> None`
+- 启动时调一次：metadata 缺 `content_time_num` 字段（旧 schema）则全库重建，否则只补未索引
+- 用 `st.session_state["_vector_db_ready"]` 单次哨兵保护，多页面切换不会重复执行
+- 失败时 `st.warning`，不抛异常
+
+### embedding metadata 字段
+
+每条 embedding 的元数据（用于 `tab_search` 过滤）：
+
+- `session_id` / `content_time_raw` / `content_time_iso` / `content_time_num` / `has_exact_date` / `upload_time` / `archive_time` / `source_type`
+- `_parse_date_iso(raw)` 支持的格式：`YYYY-MM-DD` / `YYYY/MM/DD` / `YYYY.MM.DD` / `YYYY-MM` / `YYYY/MM` / `YYYY`
+
+### 已知陷阱
+
+- `embed_session` 异常静默吞——搜索结果不全时，先 `index_existing_finals()` 重建一次再排查
+- BGE 模型 `BAAI/bge-small-zh-v1.5` 通过 `@st.cache_resource` 缓存，首次启动会下载（>200 MB）
+- 检索时给 query 加非对称前缀的逻辑在 `tab_search.py`，**不**在本模块
+- `VECTOR_DB_DIR` 在 `<repo>/vector_db`，**不**在 `data/` 下（与 v4.0.0 媒体目录迁移**不一致**，未来可考虑统一）
+
+## prompts.py
+
+> 所有 LLM System Prompt 与 User 模板的单一信息源。Skill **不得**内嵌字符串，全部从此处导入。
+
+### 常量清单
+
+| 名称 | 用途 | 模板变量 |
+|------|------|----------|
+| `TAGGING_SYSTEM` | 打标 system | — |
+| `TAGGING_USER_TMPL` | 打标 user | `{content}` |
+| `STORY_SINGLE_SYSTEM` | 单条摘要 system | — |
+| `STORY_SINGLE_USER_TMPL` | 单条摘要 user | `{content_time}` `{description}` `{feeling}` `{reason_section}` |
+| `STORY_PERIOD_SYSTEM` | 时间段叙事 system | — |
+| `STORY_PERIOD_USER_TMPL` | 时间段叙事 user | `{period}` `{memories}` |
+| `QA_SYSTEM` | 智能问答 system | — |
+
+### 修改原则
+
+- 改 prompt **必须**同步检查 Skill 的解析逻辑（字段名、JSON schema）
+- 改完跑一次 `python -m skills.tagging_skill` 本地测试（需设 `TEST_MODEL_ID` 环境变量）
+- 新增 Skill 必须在此追加常量；禁止把字符串塞回 Skill 文件
+
+## file_io.py
+
+> 文件落盘 + Markdown 导出。一律按文件类型路由到 `images/` / `videos/` / `text/` 子目录。
+
+### 公开 API
+
+#### `ensure_dirs() -> None`
+- **副作用**：创建 `data/{final,pending}/{images,videos,text}` + `vector_db/`
+- **幂等**；启动入口 `app.py` 调用
+
+#### `save_session_pending(file_data_list, source_type, field_values, tags=None) -> None`
+- **入参**：
+  - `file_data_list`：`list[tuple[bytes | file-like, original_name: str]]`
+  - `source_type`：`'file'` / `'text'` / `'folder'`
+- **副作用**：写 `data/pending/{sub}/`；插 `sessions` 行（status=pending）
+- **不写 .md，不 embed**
+
+#### `save_session_final(file_data_list, source_type, field_values, tags=None) -> None`
+- 同上 + 写 `.md` + 写 `vector_db`；`session_id` 由 `datetime.now()` 生成
+
+#### `move_to_final(session_id: str) -> None`
+- **用途**：物理搬移 pending → final + 更新 DB + 写 .md + embed
+- **副作用**：`shutil.move` 文件；改 `session_files.path` 与 `sessions.status/archive_time/is_complete`
+- **失败容忍**：源文件不存在则跳过 move，但 DB 仍按 final 标记（与历史行为一致）
+
+#### `import_folder_to_pending(file_paths: list[Path], as_one_session: bool, tags=None) -> int`
+- **返回**：创建的 session 条数
+- **`as_one_session=True`**：所有文件合并为一条 pending；流式打开避免内存峰值
+- **`as_one_session=False`**：每文件一条 pending
+
+### 半公开（被 `db_manager` 调用，不直接暴露给业务/UI）
+
+#### `_write_md(session: dict) -> None`
+- **用途**：生成/覆盖 `data/final/{session_id}.md`
+- **被谁调用**：`db_manager.update_session_fields / add_comment / delete_comment` / 本模块自身
+- **下划线含义**：业务代码与 UI 层禁止直接调，统一通过 `db_manager` 高层函数间接触发
+- **不变量**：仅 Final 记录有 .md；pending 不生成
+
+### 内部辅助（私有）
+
+- `_file_subdir(filename) -> 'images' | 'videos' | 'text'`
+- `_session_file_type(session) -> str`
+- `_write_files(file_data_list, dest_dir, session_id) -> list[dict]`
+
+### 已知陷阱
+
+- 文件名格式固定 `{session_id}_{idx:03d}_{original_name}`——更名规则改动会破坏历史路径索引
+- `_write_md` 的 .md 仅供人读 / 导出；**不**参与 embedding 索引（embedding 走 `vector_db._build_embed_text`）
+
+## media.py
+
+> 视频缩略图 + 图像格式转换。两个纯函数，无持久副作用。
+
+### 公开 API
+
+#### `video_thumbnail(video_path: Path) -> PIL.Image.Image | None`
+- **用途**：抽视频第一帧 + 叠加「▶ [视频]」黑底白字标签
+- **返回**：PIL Image；cv2 读取失败返回 `None`
+- **副作用**：cv2 短暂打开文件；自动 `cap.release()`
+
+#### `pil_to_png_bytes(img: PIL.Image.Image) -> bytes`
+- **用途**：PIL Image → PNG bytes（喂给 `st.image` 或落盘）
+
+### 已知陷阱
+
+- 损坏 / 不支持编码的视频返回 `None`，调用方自行降级（通常显示文件信息 + 下载按钮）
+- 标签像素位置硬编码（`[0,0,90,26]` 黑框 + 字符 `(6,5)`），与缩略图分辨率耦合较紧
+
+## state.py
+
+> Streamlit `session_state` 全部键的初始化清单。新增 UI 状态键**必须**在此登记。
+
+### 公开 API
+
+#### `init_state() -> None`
+- **副作用**：将约 25 个键以默认值写入 `st.session_state`（已存在跳过）
+- **调用时机**：`app.py` 启动；多次调用幂等
+
+### 当前管理的键（按域分组）
+
+- **选择状态**：`pending_selected` / `archived_selected` / `search_selected`
+- **搜索**：`semantic_results` / `semantic_query_used` / `date_filter_exact` / `_fuzzy` / `_range` / `_search_mode_prev`
+- **已归档过滤**：`archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`
+- **文件夹批量导入**：`folder_scan_results` / `folder_import_done`
+- **智能问答**：`llm_selected_model` / `llm_chat_history`
+- **LLM 配置编辑**：`_editing_pvd` / `_editing_mdl` / `_draft_provider` / `_draft_model` / `_test_result` / `_draft_test_passed` / `_confirm_edit_pvd` / `_confirm_edit_mdl`
+- **杂项**：`upload_key`
+
+### 未在此登记的运行期键（隐式）
+
+- `_vector_db_ready`：由 `vector_db._ensure_indexed()` 首次写入
+- 任何由 `setdefault` 散落到组件内的 key 都属于**应在此登记但未登记**的债务
+
+### 命名约定
+
+- `_xxx`（下划线开头）= 内部状态，不在 UI 直接展示
+- 业务相关键不要前缀下划线
+- 添加新键时同步在 `init_state()` 登记，避免散落
+
+## constants.py
+
+> 路径、文件格式、UI 列数、默认标签、`FIELD_SCHEMA` 扩展接口。零内部依赖。
+
+### 路径
+
+| 常量 | 值 |
+|------|-----|
+| `DATA_DIR` | `Path("data")` |
+| `FINAL_DIR` | `data/final` |
+| `PENDING_DIR` | `data/pending` |
+| `DB_PATH` | `data/database.db` |
+| `VECTOR_DB_DIR` | `<repo>/vector_db`（**不**在 `data/` 下） |
+
+### 文件格式集合
+
+| 常量 | 内容 |
+|------|------|
+| `TEXT_EXTS` | `.txt` `.md` |
+| `IMAGE_EXTS` | `.jpg` `.jpeg` `.png` `.gif` `.webp` `.bmp` |
+| `VIDEO_EXTS` | 13 种（`.mp4` `.mov` `.avi` `.mkv` `.wmv` `.webm` `.flv` `.m4v` `.3gp` `.ts` `.mts` `.mpg` `.mpeg`） |
+| `VIDEO_EXTS_PLAYABLE` | `.mp4` `.webm` `.mov` `.m4v` `.ogg`（浏览器原生可播） |
+| `SUPPORTED_IMPORT_EXTS` | `IMAGE_EXTS ∪ VIDEO_EXTS ∪ TEXT_EXTS` |
+
+### UI
+
+- `COLS = 3`（卡片网格列数）
+
+### 标签默认值
+
+- `DEFAULT_TAGS = ["个人规划", "生活感悟", "重要记忆", "工作总结", "随笔"]`
+- `init_db()` 启动时灌入 `tags_registry`
+
+### `FIELD_SCHEMA` — 字段扩展接口
+
+每个字段的 dict 字段约定：
+
+| 键 | 类型 | 说明 |
+|----|------|------|
+| `key` | str | 标识；同时是 SQL 列名（业务字段 `content_time / description / feeling / reason`） |
+| `label` | str | 表单与 .md 中的显示名 |
+| `required` | bool | 影响 `is_complete` 与归档放行 |
+| `type` | str | `textarea` / `text` / `date_or_text` |
+| `placeholder` | str | UI 占位 |
+| `help` | str | UI 帮助文字 |
+
+**当前 4 字段**：`content_time`(必) → `description`(必) → `feeling`(必) → `reason`(选)
+**派生**：`REQUIRED_KEYS = [k for f in FIELD_SCHEMA if f["required"]]`
+
+### 扩展规则（重要 · 当前最大紧耦合点）
+
+增字段不止改 `FIELD_SCHEMA`：
+1. 在 `FIELD_SCHEMA` 末尾追加（UI / 校验 / .md 自动跟随）✅
+2. 在 `db_manager._SCHEMA` 的 `sessions` 表加列 ⚠️
+3. 在 `db_manager._row_to_dict` 加字段映射 ⚠️
+4. 在 `db_manager.create_session` / `update_session_fields` 字段抽取里加 key ⚠️
+5. 历史库手工 `ALTER TABLE sessions ADD COLUMN ...` ⚠️
+
+> 这是当前架构遗留的最大紧耦合点，值得在未来重构里优先打破（候选方案：`sessions` 改为 K/V `session_fields` 表，业务字段全部走 EAV）。

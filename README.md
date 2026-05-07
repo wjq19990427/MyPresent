@@ -23,11 +23,9 @@
 ## 目录
 
 - [快速开始](#快速开始)
-- [项目架构](#项目架构)
-- [模块详解](#模块详解)
-- [数据文件说明](#数据文件说明)
-- [扩展开发指南](#扩展开发指南)
-- [API 参考](#api-参考)
+- [项目结构](#项目结构)
+- [协作工作流](#协作工作流)
+- [给开发者](#给开发者)
 - [Roadmap](#roadmap)
 
 ---
@@ -42,10 +40,18 @@ pip install -r requirements.txt
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
+**首次运行 / 数据迁移（从旧版本升级）**
+
+```bash
+# 如果你有旧版本的 pending_db.json / mypresent_config.json / Assets/，先执行迁移：
+python migrate.py
+```
+
+迁移脚本会自动将数据导入 SQLite、文件复制到 `data/`，并将旧 JSON 重命名为 `.bak` 备份。全新安装可跳过此步骤。
+
 **启动应用**
 
 ```bash
-cd D:\MyPresent
 streamlit run app.py
 ```
 
@@ -61,365 +67,108 @@ streamlit run app.py
 | Pillow | 10.x+ |
 | chromadb | 0.5+ |
 | sentence-transformers | 3.0+ |
+| openai | 1.x+ |
 
-**（可选）AI 自动标签**
+**配置 LLM（AI 功能）**
 
-配置环境变量 `MYPRESENT_API_KEY` 后，上传页面的「✨ AI」按钮将激活自动标签推荐（Phase 3 实现）。
+在应用的「📊 运行看板」Tab 中，通过「管理 LLM 配置」面板添加 Provider（API 地址 + Key）和 Model，无需修改配置文件或环境变量。添加后即可使用「✨ AI 推荐标签」、「✨ AI 摘要」、「✨ 生成阶段回忆录」等功能。
 
 ---
 
-## 项目架构
+## 项目结构
 
 ```
-D:\MyPresent\
-├── app.py                          # 入口（< 35 行），仅调用 main()
-├── mypresent/                      # 核心包
-│   ├── __init__.py
-│   ├── constants.py                # 全部常量 + FIELD_SCHEMA（零内部依赖）
-│   ├── config.py                   # 标签 / 分组 CRUD
-│   ├── db.py                       # pending_db.json I/O + session 数据模型
-│   ├── media.py                    # 视频缩略图、图像格式转换
-│   ├── file_io.py                  # 文件写入 / 移动 / Markdown 导出
-│   ├── vector_db.py                # ChromaDB + BGE embedding（Phase 2）
-│   ├── session_ops.py              # 字段更新、评论、auto_tag
-│   ├── state.py                    # Streamlit session state 初始化
-│   └── ui/
-│       ├── __init__.py
-│       ├── forms.py                # 表单字段渲染
-│       ├── components.py           # 共用卡片、详情、评论区、管理面板
-│       ├── tab_upload.py           # 记录舱 Tab
-│       ├── tab_gallery.py          # 灵感墙 Tab
-│       ├── tab_archived.py         # 已归档 Tab
-│       └── tab_search.py           # 搜索 Tab
-├── pending_db.json                 # 所有记录数据库（自动生成，gitignored）
-├── mypresent_config.json           # 标签 / 分组配置（自动生成，gitignored）
-├── Assets/                         # 文件存储（gitignored）
-│   ├── Pending/{images,videos,text}/
-│   └── Final/{images,videos,text}/
-├── vector_db/                      # ChromaDB 持久化（gitignored）
+MyPresent/
+├── CLAUDE.md                # 架构师（Claude）员工手册
+├── AGENTS.md                # 实现工（Codex）员工手册
+├── app.py                   # 薄启动入口
+├── core/                    # 基础设施（DB / LLM / 向量库 / IO / 媒体 / 状态 / 常量）
+├── skills/                  # LLM 能力插件（BaseSkill + 各 Skill）
+├── components/              # Streamlit UI 层
+├── data/                    # SQLite 主库 + 媒体文件（gitignored）
+├── vector_db/               # ChromaDB 持久化（gitignored）
+├── docs/
+│   ├── STATUS.md            # 项目当前状态（每次开工先读，≤ 50 行）
+│   ├── ARCHITECTURE.md      # L1 架构索引
+│   ├── api/                 # L2 模块契约（按需加载）
+│   │   ├── core.md
+│   │   ├── skills.md
+│   │   ├── components.md
+│   │   ├── database.md
+│   │   └── _TEMPLATE.md     # API 契约填写模板
+│   ├── tasks/
+│   │   └── _template.md     # 任务卡模板
+│   └── CHANGELOG_ARCHIVE.md # v3.0.0 及更早历史
+├── migrate.py               # 一次性迁移脚本（旧版 JSON → SQLite）
 ├── CHANGELOG.md
-├── requirements.txt
-└── .gitignore
+└── requirements.txt
 ```
 
-**依赖关系（无循环）**
-
-```
-constants ──────────────────────────────── (底层，无内部依赖)
-    ↑
-config ──── constants
-db ─────── constants
-media ───── constants
-    ↑
-file_io ─── constants + db + vector_db（延迟导入避免循环）
-vector_db ── constants + db
-    ↑
-session_ops ─ constants + db + file_io + vector_db
-    ↑
-state ──────── streamlit only
-ui/forms ───── constants
-ui/components ─ constants + config + db + media + session_ops + ui/forms
-ui/tab_* ────── 各自组合上述模块
-    ↑
-app.py ──────── ui/tab_* + file_io + vector_db + state
-```
+**分层依赖**：`components/` → `skills/` → `core/`，反向即架构违规。完整依赖图见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 
 ---
 
-## 模块详解
+## 协作工作流
 
-### `constants.py` — 扩展字段只改这里
+本项目采用 **AI 双员制** 开发，三方分工：
 
-所有常量的唯一来源。**新增字段只需修改 `FIELD_SCHEMA`**，UI 渲染、校验、`.md` 生成全部自动跟随。
+| 角色 | 工具 | 职责 | 配置 |
+|------|------|------|------|
+| **架构师** | Claude (Claude Code) | 设计、规划、Code Review、维护 L2 契约 | [`CLAUDE.md`](CLAUDE.md) |
+| **实现工** | Codex (Codex CLI) | 按任务卡实现代码、跑烟测、提交分支 | [`AGENTS.md`](AGENTS.md) |
+| **项目经理** | 你 | 给目标、决策、审 merge、用 git 控权 | — |
 
-```python
-FIELD_SCHEMA: list[dict] = [
-    {
-        "key":         str,   # session dict 中的键名
-        "label":       str,   # 界面显示名称
-        "required":    bool,  # True = 归档前必须填写
-        "type":        str,   # "textarea" | "text" | "date_or_text"
-        "placeholder": str,
-        "help":        str,
-    },
-    ...
-]
+### 流程
+
+```
+你 给目标
+  ↓
+架构师 读 STATUS + 相关 L2 契约 → 写任务卡 docs/tasks/task-N.md
+  ↓
+你 把任务卡路径交给实现工
+  ↓
+实现工 在 git worktree 分支实现 → push 分支
+  ↓
+架构师 对照 L2 契约做 Code Review
+  ↓
+通过 → 你 merge；不过 → 架构师写补充任务卡返工
 ```
 
-`type` 说明：
+### 关键约定
 
-| type | 控件 | 适用场景 |
-|------|------|----------|
-| `textarea` | 多行文本框 | 描述、感受等长文本 |
-| `text` | 单行文本框 | 简短标签、标题 |
-| `date_or_text` | 日历 + 自由输入双控件 | 时间字段（支持模糊时间如"去年夏天"） |
+- **L2 先行**：改 `core/` `skills/` `components/` 任何文件前必读 `docs/api/{layer}.md`（CLAUDE.md 规则 5 / AGENTS.md 上岗前必读 5）
+- **契约同步**：公开 API 变化必须在同一提交同步更新对应 `docs/api/*.md`
+- **Worktree 隔离**：实现工在独立 worktree 工作，禁止 push main
+- **状态快照**：`docs/STATUS.md` 由架构师按任务进展维护，单文件 ≤ 50 行
+
+任务卡填写见 [`docs/tasks/_template.md`](docs/tasks/_template.md)。
 
 ---
 
-### `config.py` — 标签 / 分组数据
+## 给开发者
 
-管理 `mypresent_config.json`，提供标签注册表和分组的 CRUD。
+详细开发文档已分层组织，按需读：
 
-- `get_tags_registry()` / `add_tag()` / `remove_tag()`
-- `get_groups()` / `create_group()` / `delete_group()`
+| 想做什么 | 读哪里 |
+|----------|--------|
+| 了解项目当前状态、焦点、技术债 | [`docs/STATUS.md`](docs/STATUS.md) |
+| 看分层架构与依赖方向 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
+| 找某个函数 / Skill / 组件的契约 | [`docs/api/`](docs/api/) |
+| SQLite 表结构（11 张表） | [`docs/api/database.md`](docs/api/database.md) |
+| 新增字段 / 新增 Skill / 替换向量库 | 对应 `docs/api/*.md` 的「扩展规则」节 |
+| 历史版本（v1-v3） | [`docs/CHANGELOG_ARCHIVE.md`](docs/CHANGELOG_ARCHIVE.md) |
 
-默认标签（`DEFAULT_TAGS`）不可删除，自定义标签随时可删。`delete_group()` 会自动清理所有 session 的 `group_ids`。
+### 速记
 
----
+**新增 Skill**（详见 [`docs/api/skills.md`](docs/api/skills.md)）：
 
-### `db.py` — Session 数据模型
+1. 在 `core/prompts.py` 加 prompt 常量
+2. 在 `skills/` 下继承 `BaseSkill`，实现 `run()` / `execute()`
+3. 在 `components/` 调用，结果缓存到 `st.session_state`
 
-管理 `pending_db.json` 的读写，以及 session 的创建和校验。
+**新增 `FIELD_SCHEMA` 字段**（详见 [`docs/api/core.md`](docs/api/core.md) 的 `constants.py` 节）：
 
-- `load_db()` / `save_db()` — 全量读写，损坏时返回 `[]` 不抛异常
-- `validate_session(session)` — 返回未填写的必填字段 label 列表
-- `_is_text_session(session)` — 判断是否为纯文字记录
-- `_make_session(...)` — 创建标准 session dict
-- `_apply_fields(session, values)` — 将字段值写入 session 并重算 `is_complete`
-
----
-
-### `media.py` — 视频 / 图像处理
-
-- `video_thumbnail(path)` — 提取视频第一帧，叠加「▶ [视频]」标签，返回 PIL Image
-- `pil_to_png_bytes(img)` — PIL Image → PNG bytes，供 `st.image()` 使用
-
----
-
-### `file_io.py` — 文件存储规则
-
-文件按类型自动路由到子目录：`images/` / `videos/` / `text/`，流式写入避免大视频双倍内存占用。
-
-关键函数：
-
-- `ensure_dirs()` — 应用启动时调用，创建所有子目录
-- `_write_files(file_data_list, dest_dir, session_id)` — 写文件并返回 file_entries
-- `_write_md(session)` — 生成/重写 Final 目录的 `.md` 文档
-- `save_session_pending(...)` — 暂存到 Pending
-- `save_session_final(...)` — 直接归档到 Final（同时写向量库）
-- `move_to_final(session_id)` — Pending → Final 迁移（同时写向量库）
-- `import_folder_to_pending(file_paths, as_one_session)` — 文件夹批量导入
-
----
-
-### `vector_db.py` — Embedding 方案
-
-使用 ChromaDB（本地持久化，cosine 相似度）+ `BAAI/bge-small-zh-v1.5` 模型。
-
-- `_get_embedder()` / `_get_collection()` — `@st.cache_resource` 装饰，首次调用时初始化
-- `embed_session(session)` — upsert 到向量库（归档 / 字段更新时自动调用）
-- `delete_embedding(session_id)` — 从向量库删除
-- `_ensure_indexed()` — 启动时补全历史 Final 记录的索引，自动检测 schema 升级
-
-替换向量库只需修改此文件，其他模块无感知。
-
----
-
-### `session_ops.py` — 如何添加新的 Session 操作
-
-高层操作函数，组合 db + file_io + vector_db：
-
-- `update_session_fields(session_id, new_values)` — 字段更新（Final 记录自动追加 edit_history，重写 .md，更新向量库）
-- `update_session_tags(session_id, tags)` — 单独更新标签（不触发 edit_history）
-- `update_session_groups(session_id, group_ids)` — 单独更新分组
-- `add_comment(session_id, text)` / `delete_comment(session_id, comment_id)` — 评论操作
-- `auto_tag_session(session)` — AI 标签接口（Phase 3 stub，配置 `MYPRESENT_API_KEY` 后实现）
-
-**新增 Session 操作**：在此文件添加函数，组合 db / file_io / vector_db 即可，无需修改其他层。
-
----
-
-### `ui/` — 如何添加新 Tab 或新 UI 组件
-
-**新增 Tab**：
-1. 在 `ui/` 下新建 `tab_xxx.py`，导出 `render_xxx_tab()` 函数
-2. 在 `app.py` 的 `st.tabs([...])` 中注册，并在对应 `with` 块调用
-
-**新增共用组件**：添加到 `ui/components.py`。
-
-**`ui/forms.py`** — `render_field_inputs(prefix, defaults, skip_keys)` 是字段渲染的统一入口，必须在 `st.form()` 块内调用。
-
-**`ui/components.py`** — 核心组件：
-- `_render_card(col, session, state_key, score)` — 卡片（画廊 / 搜索结果均复用）
-- `_render_detail(session, mode, state_key)` — 详情 + 编辑面板（`mode="pending"|"final"`）
-- `_render_comments(session)` — 评论区（必须在 form 外调用）
-- `_render_tag_manager()` / `_render_group_manager()` — 管理面板
-
----
-
-## 数据文件说明
-
-### `pending_db.json` — Session 数据库
-
-JSON 数组，每个元素为一条记录：
-
-```jsonc
-{
-  "session_id":   "20260424_192301",     // 唯一 ID：YYYYMMDD_HHMMSS
-  "status":       "pending",             // "pending" | "final"
-  "upload_time":  "2026-04-24 19:23:01",
-  "archive_time": "",                    // 归档时填入
-  "is_complete":  false,                 // 必填项是否全部完整（自动计算）
-  "source_type":  "file",               // "file" | "text"
-  "files": [
-    {
-      "filename":      "20260424_192301_000_photo.jpg",
-      "original_name": "photo.jpg",
-      "path":          "Assets/Pending/images/20260424_..."
-    }
-  ],
-  "tags":         ["生活感悟"],
-  "group_ids":    ["grp_20260425_100000"],
-  "comments":     [{"id": "...", "text": "...", "created_at": "..."}],
-  "edit_history": [{"edited_at": "...", "changes": {"feeling": {"from": "旧", "to": "新"}}}],
-  // FIELD_SCHEMA 字段：
-  "content_time": "2025-06-01",
-  "description":  "...",
-  "feeling":      "...",
-  "reason":       ""
-}
-```
-
-### `mypresent_config.json` — 标签 / 分组配置
-
-```jsonc
-{
-  "tags_registry": ["个人规划", "生活感悟", "重要记忆", "工作总结", "随笔", "自定义标签"],
-  "groups": [
-    {"id": "grp_20260425_100000", "name": "2026年春", "created_at": "2026-04-25 10:00:00"}
-  ]
-}
-```
-
----
-
-## 扩展开发指南
-
-### 新增元数据字段
-
-只改 `mypresent/constants.py` 中的 `FIELD_SCHEMA`：
-
-```python
-{
-    "key":         "mood_score",
-    "label":       "心情评分",
-    "required":    False,
-    "type":        "text",
-    "placeholder": "1-10 分",
-    "help":        "选填",
-},
-```
-
-新字段自动出现在所有表单、`.md` 导出中。旧记录中该字段为空字符串，不影响兼容性。
-
-### 接入 AI 自动标签（Phase 3）
-
-实现 `mypresent/session_ops.py` 中的 `auto_tag_session(session) -> list[str]`：
-
-```python
-def auto_tag_session(session: dict) -> list[str]:
-    api_key = os.environ.get("MYPRESENT_API_KEY")
-    if not api_key:
-        return []
-    # 调用 Claude / OpenAI API，基于 description + feeling 推荐标签
-    ...
-```
-
-### 替换向量库
-
-只修改 `mypresent/vector_db.py`，其他模块通过 `embed_session` / `delete_embedding` / `_ensure_indexed` 调用，接口不变。
-
-### 接入外部存储
-
-替换这些函数即可切换后端，接口签名不变：
-
-| 函数（位于 `file_io.py` / `db.py`） | 替换方向 |
-|------|----------|
-| `load_db()` / `save_db()` | 数据库 / 对象存储 |
-| `_write_files()` | OSS / S3 上传 |
-| `move_to_final()` | 远程 copy + delete |
-| `_write_md()` | 上传到对象存储 |
-
-### 新增支持的文件类型
-
-1. 在 `constants.py` 的对应集合中添加扩展名（`IMAGE_EXTS` / `VIDEO_EXTS` / `TEXT_EXTS`）
-2. 在 `ui/tab_upload.py` 的 `file_uploader` 的 `type=` 列表中添加
-3. 在 `ui/components.py` 的 `_render_detail` 文件预览区添加对应渲染分支
-
----
-
-## API 参考
-
-### db.py
-
-```python
-load_db() -> list[dict]
-save_db(data: list[dict]) -> None
-validate_session(session: dict) -> list[str]      # 返回未填写的必填字段 label
-_is_text_session(session: dict) -> bool
-_make_session(session_id, file_entries, source_type, field_values, tags) -> dict
-```
-
-### file_io.py
-
-```python
-ensure_dirs() -> None
-save_session_pending(file_data_list, source_type, field_values, tags=None) -> None
-save_session_final(file_data_list, source_type, field_values, tags=None) -> None
-move_to_final(session_id: str) -> None
-import_folder_to_pending(file_paths: list[Path], as_one_session: bool) -> int
-```
-
-`file_data_list` 的每个元素为 `(bytes | file-like, original_name: str)`。
-
-### session_ops.py
-
-```python
-update_session_fields(session_id: str, new_values: dict) -> None
-update_session_tags(session_id: str, tags: list[str]) -> None
-update_session_groups(session_id: str, group_ids: list[str]) -> None
-add_comment(session_id: str, text: str) -> None
-delete_comment(session_id: str, comment_id: str) -> None
-auto_tag_session(session: dict) -> list[str]    # Phase 3 stub
-```
-
-### config.py
-
-```python
-get_tags_registry() -> list[str]
-add_tag(tag: str) -> None
-remove_tag(tag: str) -> None            # 默认标签在 UI 层保护，此函数不做检查
-get_groups() -> list[dict]
-create_group(name: str) -> str          # 返回 group_id
-delete_group(group_id: str) -> None     # 同时清理所有 session 的 group_ids
-```
-
-### vector_db.py
-
-```python
-embed_session(session: dict) -> None        # upsert（失败静默）
-delete_embedding(session_id: str) -> None   # 失败静默
-_ensure_indexed() -> None                   # 启动时补全历史索引
-```
-
-### ui/components.py
-
-```python
-_render_card(col, session, state_key, score=None) -> None
-_render_detail(session, mode, state_key=None) -> None   # mode="pending"|"final"
-_render_comments(session) -> None           # 必须在 st.form() 外调用
-_render_tag_manager() -> None
-_render_group_manager() -> None
-```
-
-### ui/forms.py
-
-```python
-render_field_inputs(prefix, defaults=None, skip_keys=None) -> dict
-# 必须在 st.form() 块内调用
-# prefix：同一页面多处调用时保证唯一（如 "upload"、"edit_20260424_192301"）
-# skip_keys：跳过渲染但保留 defaults 中对应值
-```
+⚠️ 不止改 `FIELD_SCHEMA`——SQLite schema、`db_manager` 的字段抽取共有 5 处需改，是当前架构最大紧耦合点。
 
 ---
 
@@ -429,5 +178,5 @@ render_field_inputs(prefix, defaults=None, skip_keys=None) -> dict
 |-------|------|------|
 | Phase 1 | ✅ 完成 | 基础上传、归档、灵感墙、评论区、编辑历史 |
 | Phase 2 | ✅ 完成 | ChromaDB embedding、日期过滤搜索、语义检索、标签/分组、文件夹导入 |
-| Phase 3 | 🔜 计划中 | AI 标签推荐（`auto_tag_session`）、智能问答（`render_search_tab` 问答模式） |
-| Phase 4 | 🔜 计划中 | OurPresent — 多用户版本，社区化分享，记录开放与隐私控制 |
+| Phase 3 | ✅ 完成 | SQLite 重构、Skills 插件体系、统一 LLM 调用层、LLM 评估看板 |
+| Phase 4 | 🔜 计划中 | OurPresent — 多用户版本、社区化分享、记录开放与隐私控制 |
