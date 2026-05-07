@@ -225,7 +225,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **副作用**：
   - 调 `auto_tag_session` → 写 `_ai_tag_result_{state_key}`
   - 用户勾选 → 写 `_ai_tag_checked_{state_key}`
-  - 应用按钮 → 写 `_ai_applied_tags_{state_key}` + `del st.session_state[apply_key]`
+  - 应用按钮 → 调 `add_tag()` 把 `updated` 中不在 registry 的标签写入 `tags_registry`，再写 `_ai_applied_tags_{state_key}` + `del st.session_state[apply_key]`
 
 ### session_state 键空间约定
 
@@ -238,4 +238,4 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 ### 已知陷阱
 
 - 与 `cards._render_detail` 是**紧耦合**：`apply_key` 必须等于详情表单内 multiselect 的 widget key，否则应用无效
-- AI 新生成的标签**不**在此组件入库；用户在详情表单点保存时由 `cards._render_detail` 触发 `add_tag`
+- 应用按钮按下时即调 `add_tag` 入库；`cards._render_detail` 的入库循环作为 belt-and-suspenders 兼职捕获 session 历史孤儿标签

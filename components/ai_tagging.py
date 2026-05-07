@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core.db_manager import add_tag, get_tags_registry
 from skills.tagging_skill import auto_tag_session
 
 
@@ -111,6 +112,10 @@ def render_ai_tag_picker(
                 type="primary",
                 use_container_width=True,
             ):
+                registry = get_tags_registry()
+                for tag in updated:
+                    if tag not in registry:
+                        add_tag(tag)
                 st.session_state[applied_key] = updated
                 # 清除表单 multiselect 的 widget state，强制下次渲染采用新 default
                 if apply_key and apply_key in st.session_state:
