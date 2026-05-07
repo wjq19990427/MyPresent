@@ -18,17 +18,17 @@
 
 ## 当前焦点
 
-- **AI 双员制首次完整跑通** ✅（task-1 派发 → Codex 实现 → Review → merge）
-- 下一步任务卡候选：`tab_upload` 「✨ AI」按钮双重 bug（`dict-vs-list` + 不入库）
-- 工作树残留：`app.py`（标题）/ `eval_dashboard.py`（看板扩展）/ `tab_search.py`（大改动）待 commit
+- **task-2 merge** ✅：`tab_upload` AI 按钮 dict-vs-list + 新标签不入库双重 bug 修复
 - 已知技术债：`tab_search` 跨层调用 `vector_db._get_*`；pending 孤儿行无清理脚本；`FIELD_SCHEMA` 增字段需手改 5 处
 
 ## 最近完成
 
+- **task-2 merge**：`tab_upload.py` AI 按钮适配新 dict 返回值 + `add_tag` 即入库
+- **工作树清理**：`eval_dashboard` LLM 配置管理迁移、`tab_search` 瘦身、应用标题更新已 commit
 - **task-1 merge**（e863bd4）：`ai_tagging.py` apply 时即入库，L2 契约同步
-- README 瘦身（463→182 行）+ AGENTS.md + 任务卡模板，AI 双员制基建完成
-- L2 契约首轮全量回填：`database.md`(11 表) / `core.md`(8 文件) / `skills.md`(3 类) / `components.md`(8 组件)
+- AI 双员制基建完成（AGENTS.md + 任务卡模板 + README 重构）
 
 ## 待办 / TODO
 
-- [ ] 
+- [ ] 技术债：`tab_search` 跨层调用 `vector_db._get_*` 改为走公开接口
+- [ ] 技术债：pending 孤儿行清理脚本
