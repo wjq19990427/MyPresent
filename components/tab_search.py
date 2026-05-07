@@ -4,15 +4,11 @@ from __future__ import annotations
 import streamlit as st
 
 from core.constants import COLS
-from core.db_manager import (
-    load_db,
-    get_llm_providers, get_llm_models,
-    add_llm_provider, remove_llm_provider, update_llm_provider,
-    add_llm_model, remove_llm_model, update_llm_model,
-)
-from core.llm_client import call, call_with_config
+from core.db_manager import load_db, get_llm_models
+from core.llm_client import call
 from core.vector_db import _get_collection, _get_embedder
 from components.cards import _render_card, _render_detail
+from components.eval_dashboard import render_model_selector
 
 
 # ─── 搜索结果渲染 ────────────────────────────────────────────────────────────
@@ -217,337 +213,19 @@ def _render_semantic_search() -> None:
     _render_search_results(pairs, "search_selected")
 
 
-# ─── LLM 配置管理面板 ────────────────────────────────────────────────────────
-
-_TEST_MESSAGE = "这是一个测试字段，来自于MyPresent项目，收到后请回复 你好MyPresent"
-
-
-def _clear_draft() -> None:
-    for k in ("_draft_provider", "_draft_model", "_test_result"):
-        st.session_state[k] = None
-    st.session_state["_draft_test_passed"] = False
-
-
-def _enter_draft(provider: dict, model: dict) -> None:
-    st.session_state["_draft_provider"]    = provider
-    st.session_state["_draft_model"]       = model
-    st.session_state["_test_result"]       = None
-    st.session_state["_draft_test_passed"] = False
-    st.session_state["_editing_pvd"]       = None
-    st.session_state["_editing_mdl"]       = None
-
-
-def _render_llm_settings() -> None:
-    providers   = get_llm_providers()
-    models      = get_llm_models()
-    pvd_map     = {p["id"]: p["name"] for p in providers}
-    draft_pvd   = st.session_state.get("_draft_provider")
-    draft_mdl   = st.session_state.get("_draft_model")
-    test_result = st.session_state.get("_test_result")
-    test_passed = st.session_state.get("_draft_test_passed", False)
-
-    st.markdown("**🔌 API Provider**")
-    if providers:
-        for p in providers:
-            if st.session_state.get("_confirm_edit_pvd") == p["id"]:
-                with st.container(border=True):
-                    st.warning(
-                        f"修改 `{p['name']}` 的配置后需要**重新测试**（会消耗少量 token），确认继续？"
-                    )
-                    cc1, cc2 = st.columns(2)
-                    with cc1:
-                        if st.button("确认修改", key=f"confirm_edit_pvd_{p['id']}", type="primary"):
-                            st.session_state["_confirm_edit_pvd"] = None
-                            st.session_state["_editing_pvd"] = p["id"]
-                            st.rerun()
-                    with cc2:
-                        if st.button("取消", key=f"cancel_confirm_pvd_{p['id']}"):
-                            st.session_state["_confirm_edit_pvd"] = None
-                            st.rerun()
-            elif st.session_state.get("_editing_pvd") == p["id"]:
-                with st.container(border=True):
-                    ep_name = st.text_input("名称", value=p["name"], key=f"ep_name_{p['id']}")
-                    ep_url  = st.text_input("Base URL", value=p["base_url"], key=f"ep_url_{p['id']}")
-                    ep_key  = st.text_input("API Key", value=p["api_key"],
-                                            key=f"ep_key_{p['id']}", type="password")
-                    ep_fw   = st.selectbox("框架", ["openai"], key=f"ep_fw_{p['id']}")
-                    sa, sb = st.columns(2)
-                    with sa:
-                        if st.button("🧪 保存并测试", key=f"save_test_pvd_{p['id']}", type="primary"):
-                            pvd_models = [m for m in models if m["provider_id"] == p["id"]]
-                            if pvd_models:
-                                _enter_draft(
-                                    provider={
-                                        "name": ep_name.strip(),
-                                        "base_url": ep_url.strip().rstrip("/"),
-                                        "api_key": ep_key.strip(),
-                                        "framework": ep_fw,
-                                        "_id": p["id"],
-                                    },
-                                    model={**pvd_models[0], "_readonly": True},
-                                )
-                                st.rerun()
-                            else:
-                                st.warning("该 Provider 下暂无模型，请先追加模型后再修改。")
-                    with sb:
-                        if st.button("取消", key=f"cancel_edit_pvd_{p['id']}"):
-                            st.session_state["_editing_pvd"] = None
-                            st.rerun()
-            else:
-                c1, c2, c3 = st.columns([5, 1, 1])
-                with c1:
-                    st.markdown(f"`{p['name']}`　`{p['base_url']}`　`{p['framework']}`")
-                    st.caption(f"Key: {p['api_key'][:8]}…{p['api_key'][-4:]}")
-                with c2:
-                    if st.button("✏️", key=f"edit_pvd_{p['id']}", help="编辑"):
-                        st.session_state["_confirm_edit_pvd"] = p["id"]
-                        st.session_state["_confirm_edit_mdl"] = None
-                        st.rerun()
-                with c3:
-                    if st.button("🗑️", key=f"del_pvd_{p['id']}", help="删除"):
-                        remove_llm_provider(p["id"])
-                        st.rerun()
-    else:
-        st.caption("暂无已保存的 Provider。")
-
-    st.divider()
-
-    st.markdown("**🤖 已保存模型**")
-    if models:
-        for m in models:
-            if st.session_state.get("_confirm_edit_mdl") == m["id"]:
-                with st.container(border=True):
-                    st.warning(
-                        f"修改模型 `{m['display_name']}` 后需要**重新测试**，确认继续？"
-                    )
-                    cc1, cc2 = st.columns(2)
-                    with cc1:
-                        if st.button("确认修改", key=f"confirm_edit_mdl_{m['id']}", type="primary"):
-                            st.session_state["_confirm_edit_mdl"] = None
-                            st.session_state["_editing_mdl"] = m["id"]
-                            st.rerun()
-                    with cc2:
-                        if st.button("取消", key=f"cancel_confirm_mdl_{m['id']}"):
-                            st.session_state["_confirm_edit_mdl"] = None
-                            st.rerun()
-            elif st.session_state.get("_editing_mdl") == m["id"]:
-                with st.container(border=True):
-                    em_name = st.text_input("模型 ID", value=m["name"], key=f"em_name_{m['id']}")
-                    em_disp = st.text_input("显示名称", value=m["display_name"], key=f"em_disp_{m['id']}")
-                    sa, sb = st.columns(2)
-                    with sa:
-                        if st.button("🧪 保存并测试", key=f"save_test_mdl_{m['id']}", type="primary"):
-                            pvd = next((p for p in providers if p["id"] == m["provider_id"]), None)
-                            if pvd:
-                                _enter_draft(
-                                    provider={**pvd, "_id": pvd["id"], "_readonly": True},
-                                    model={
-                                        "name":         em_name.strip(),
-                                        "display_name": em_disp.strip() or em_name.strip(),
-                                        "_id":          m["id"],
-                                        "provider_id":  m["provider_id"],
-                                    },
-                                )
-                                st.rerun()
-                            else:
-                                st.error("找不到对应 Provider，请检查配置。")
-                    with sb:
-                        if st.button("取消", key=f"cancel_edit_mdl_{m['id']}"):
-                            st.session_state["_editing_mdl"] = None
-                            st.rerun()
-            else:
-                c1, c2, c3 = st.columns([5, 1, 1])
-                with c1:
-                    st.markdown(
-                        f"`{m['display_name']}`　`{m['name']}`　"
-                        f"via `{pvd_map.get(m['provider_id'], '?')}`"
-                    )
-                with c2:
-                    if st.button("✏️", key=f"edit_mdl_{m['id']}", help="编辑"):
-                        st.session_state["_confirm_edit_mdl"] = m["id"]
-                        st.session_state["_confirm_edit_pvd"] = None
-                        st.rerun()
-                with c3:
-                    if st.button("🗑️", key=f"del_mdl_{m['id']}", help="删除"):
-                        remove_llm_model(m["id"])
-                        if st.session_state.get("llm_selected_model") == m["id"]:
-                            st.session_state["llm_selected_model"] = None
-                        st.rerun()
-    else:
-        st.caption("暂无已保存模型。")
-
-    if providers and not draft_pvd:
-        with st.expander("➕ 为已有 Provider 追加模型"):
-            nm_pvd  = st.selectbox(
-                "所属 Provider",
-                options=[p["id"] for p in providers],
-                format_func=lambda pid: pvd_map.get(pid, pid),
-                key="nm_pvd",
-            )
-            nm_name = st.text_input("模型 ID", key="nm_name", placeholder="gpt-4o-mini")
-            nm_disp = st.text_input("显示名称（留空同模型 ID）", key="nm_disp",
-                                    placeholder="GPT-4o Mini")
-            if st.button("添加模型", key="add_mdl_btn", type="primary"):
-                if nm_name and nm_pvd:
-                    try:
-                        add_llm_model(nm_name, nm_pvd, nm_disp)
-                        for k in ("nm_name", "nm_disp"):
-                            st.session_state.pop(k, None)
-                        st.success("模型已添加")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"添加失败：{e}")
-                else:
-                    st.warning("请填写模型 ID 并选择 Provider")
-
-    st.divider()
-
-    if draft_pvd and draft_mdl:
-        is_edit_pvd = "_id" in draft_pvd and not draft_pvd.get("_readonly")
-        is_edit_mdl = "_id" in draft_mdl and not draft_mdl.get("_readonly")
-        action      = "更新" if (is_edit_pvd or is_edit_mdl) else "保存"
-
-        st.markdown(
-            f"**🧪 {'修改' if (is_edit_pvd or is_edit_mdl) else '新增'}配置测试中**"
-            f" — `{draft_pvd['name']}`  ·  `{draft_mdl['display_name']}`"
-        )
-        with st.container(border=True):
-            st.caption("**📤 将发送以下固定测试字段：**")
-            st.code(_TEST_MESSAGE, language=None)
-            if test_result:
-                st.markdown(f"**💬 API 回复：** {test_result['reply']}")
-            else:
-                if st.button("▶ 发送测试", key="draft_send_btn", type="primary"):
-                    with st.spinner("调用中…"):
-                        try:
-                            reply = call_with_config(
-                                [{"role": "user", "content": _TEST_MESSAGE}],
-                                draft_mdl, draft_pvd,
-                            )
-                            st.session_state["_test_result"]       = {"reply": reply}
-                            st.session_state["_draft_test_passed"] = True
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"调用失败：{e}")
-
-        if test_passed:
-            st.success(f"✅ API 调用成功！点击「确认{action}」使配置生效。")
-
-        ca, cb, cc = st.columns(3)
-        with ca:
-            if st.button(f"✅ 确认{action}", key="draft_confirm_btn",
-                         type="primary", disabled=not test_passed):
-                new_pvd_id = None
-                if is_edit_pvd:
-                    update_llm_provider(
-                        draft_pvd["_id"], name=draft_pvd["name"],
-                        base_url=draft_pvd["base_url"], api_key=draft_pvd["api_key"],
-                        framework=draft_pvd["framework"],
-                    )
-                elif not draft_pvd.get("_readonly"):
-                    new_pvd_id = add_llm_provider(
-                        draft_pvd["name"], draft_pvd["base_url"],
-                        draft_pvd["api_key"], draft_pvd["framework"],
-                    )
-                if is_edit_mdl:
-                    update_llm_model(
-                        draft_mdl["_id"], name=draft_mdl["name"],
-                        display_name=draft_mdl["display_name"],
-                    )
-                elif not draft_mdl.get("_readonly"):
-                    pvd_id_for_model = (
-                        new_pvd_id
-                        or draft_mdl.get("provider_id")
-                        or draft_pvd.get("_id")
-                    )
-                    add_llm_model(
-                        draft_mdl["name"], pvd_id_for_model,
-                        draft_mdl["display_name"],
-                    )
-                _clear_draft()
-                st.success(f"配置已{action}！")
-                st.rerun()
-        with cb:
-            if st.button("✏️ 修改配置", key="draft_edit_btn"):
-                _clear_draft()
-                st.rerun()
-        with cc:
-            if st.button("❌ 放弃", key="draft_cancel_btn"):
-                _clear_draft()
-                st.rerun()
-    else:
-        with st.expander("➕ 新增 Provider + 首个模型", expanded=not providers):
-            st.markdown("**Provider 信息**")
-            np_name  = st.text_input("名称", key="np_name", placeholder="老张AI")
-            np_url   = st.text_input("Base URL", key="np_url",
-                                     placeholder="https://api.laozhang.ai/v1")
-            np_key   = st.text_input("API Key", key="np_key", type="password",
-                                     placeholder="sk-...")
-            np_fw    = st.selectbox("框架", ["openai"], key="np_fw",
-                                    help="openai = 兼容 OpenAI SDK 的所有 API")
-            st.markdown("**首个模型（用于测试）**")
-            np_mname = st.text_input("模型 ID", key="np_mname", placeholder="gpt-4o-mini")
-            np_mdisp = st.text_input("显示名称（留空同模型 ID）", key="np_mdisp",
-                                     placeholder="GPT-4o Mini")
-            if st.button("🧪 开始测试", key="start_test_btn", type="primary"):
-                if np_name and np_url and np_key and np_mname:
-                    _enter_draft(
-                        provider={
-                            "name":      np_name.strip(),
-                            "base_url":  np_url.strip().rstrip("/"),
-                            "api_key":   np_key.strip(),
-                            "framework": np_fw,
-                        },
-                        model={
-                            "name":         np_mname.strip(),
-                            "display_name": np_mdisp.strip() or np_mname.strip(),
-                        },
-                    )
-                    st.rerun()
-                else:
-                    st.warning("请填写所有必要字段（名称、Base URL、API Key、模型 ID）")
-
-
-# ─── 智能问答 ─────────────────────────────────────────────────────────────────
+# ─── 智能问答 ─────────────────────────────────────────────────────────────────────────────
 
 def _render_qa() -> None:
     models = get_llm_models()
-
-    with st.expander("⚙️ 模型与 API 配置", expanded=not models):
-        _render_llm_settings()
-
     if not models:
-        st.info("请先在上方「模型与 API 配置」中添加 Provider 和模型。")
+        st.info("请先前往「📈 运行看板」 Tab 添加 Provider 和模型。")
         return
-
-    model_ids   = [m["id"] for m in models]
-    cur_model   = st.session_state.get("llm_selected_model")
-    if cur_model not in model_ids:
-        cur_model = model_ids[0]
-        st.session_state["llm_selected_model"] = cur_model
-
-    providers = get_llm_providers()
-    pvd_name  = {p["id"]: p["name"] for p in providers}
-    mdl_label = {
-        m["id"]: f"{pvd_name.get(m['provider_id'], '?')}  ·  {m['display_name']}"
-        for m in models
-    }
 
     col_sel, col_clr = st.columns([4, 1])
     with col_sel:
-        chosen = st.selectbox(
-            "选择模型",
-            options=model_ids,
-            index=model_ids.index(cur_model),
-            format_func=lambda mid: mdl_label.get(mid, mid),
-            key="llm_model_select",
-            label_visibility="collapsed",
-        )
-        if chosen != st.session_state.get("llm_selected_model"):
-            st.session_state["llm_selected_model"] = chosen
-            st.rerun()
+        render_model_selector(widget_key="llm_model_select_qa")
     with col_clr:
-        history: list[dict] = st.session_state.get("llm_chat_history", [])
+        history = st.session_state.get("llm_chat_history", [])
         if st.button("🗑️ 清空", key="clear_chat_btn", disabled=not history):
             st.session_state["llm_chat_history"] = []
             st.rerun()
@@ -578,7 +256,6 @@ def _render_qa() -> None:
                 history.pop()
                 st.session_state["llm_chat_history"] = history
                 st.error(f"调用失败：{e}")
-
 
 # ─── Tab 入口 ─────────────────────────────────────────────────────────────────
 
