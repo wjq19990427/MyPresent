@@ -11,8 +11,8 @@
     )
 
 点击「应用到标签栏」后，组件会把用户勾选的标签写入
-session_state["_ai_applied_tags_{state_key}"]，并清除 apply_key 对应的
-widget state，触发 st.rerun() 使表单以新 default 重新渲染。
+session_state["_ai_applied_tags_{state_key}"]，并合并写入 apply_key 对应的
+widget state，触发 st.rerun() 使标签栏自动勾选。
 
 render_ai_tag_picker 必须在 st.form() 外部调用。
 """
@@ -36,8 +36,8 @@ def render_ai_tag_picker(
         session_data: 包含 description / feeling 等字段的 session 字典。
         model_id:     当前选中的 LLM model id。
         state_key:    session_state 中存储 AI 分析结果的命名空间键（保证唯一）。
-        apply_key:    表单内标签 multiselect 的 widget key；点击「应用」时自动清除，
-                      使表单以新 default 重新渲染。传空串则不清除。
+        apply_key:    标签 multiselect 的 widget key；点击「应用」时自动合并写入。
+                      传空串则只写 applied_key。
     """
     result_key  = f"_ai_tag_result_{state_key}"
     checked_key = f"_ai_tag_checked_{state_key}"
@@ -116,8 +116,11 @@ def render_ai_tag_picker(
                 for tag in updated:
                     if tag not in registry:
                         add_tag(tag)
-                st.session_state[applied_key] = updated
-                # 清除表单 multiselect 的 widget state，强制下次渲染采用新 default
-                if apply_key and apply_key in st.session_state:
-                    del st.session_state[apply_key]
+                applied = list(dict.fromkeys(updated))
+                st.session_state[applied_key] = applied
+                if apply_key:
+                    current = st.session_state.get(apply_key, [])
+                    st.session_state[apply_key] = list(dict.fromkeys(
+                        [*current, *applied]
+                    ))
                 st.rerun()

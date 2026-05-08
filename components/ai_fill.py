@@ -14,7 +14,6 @@ def render_ai_fill_picker(
 ) -> None:
     """渲染「AI 补全感受与原因」交互块。"""
     result_key  = f"_ai_fill_result_{state_key}"
-    pending_key = f"_ai_fill_pending_{state_key}"
     result = st.session_state.get(result_key)
 
     if not model_id:
@@ -45,12 +44,8 @@ def render_ai_fill_picker(
             ca, cb = st.columns(2)
             with ca:
                 if st.button("✅ 应用", key=f"ai_fill_apply_{state_key}", type="primary"):
-                    st.session_state.pop(f"{form_prefix}_feeling", None)
-                    st.session_state.pop(f"{form_prefix}_reason", None)
-                    st.session_state[pending_key] = {
-                        "feeling": result["feeling"],
-                        "reason":  result.get("reason", ""),
-                    }
+                    st.session_state[f"{form_prefix}_feeling"] = result["feeling"]
+                    st.session_state[f"{form_prefix}_reason"] = result.get("reason", "")
                     st.session_state.pop(result_key, None)
                     st.rerun()
             with cb:

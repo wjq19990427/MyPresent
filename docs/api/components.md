@@ -53,13 +53,14 @@
   - AI 推荐的新标签在保存时通过 `add_tag` 自动入库
 - **依赖组件**：`forms.render_field_inputs` / `ai_fill.render_ai_fill_picker` / `ai_tagging.render_ai_tag_picker` / `_render_ai_summary` / `_render_comments`
 - **已知陷阱**：widget key 用 `safe_sid = "".join(c if c.isalnum() else "_" for c in sid)` 净化，避免 streamlit 对特殊字符报错
-- **AI 补全**：在 form 外渲染；`state_key=f"fill_{safe_sid}"`，`form_prefix=f"edit_{safe_sid}"`；应用后读取 `_ai_fill_pending_fill_{safe_sid}` 合并到表单 defaults
+- **AI 功能位置**：AI 补全在字段编辑区上方；AI 摘要在字段区下方，pending/final 均可用；AI 标签在标签 multiselect 上方
+- **保存控件**：详情页使用普通 `st.button` 即时按钮，不再用 `st.form`，避免 AI 组件写入 widget state 后前端不刷新
 
 ### `_render_comments(session) -> None`
 - **必须**在 `st.form` 外调用（依赖 `st.button` 即时回写）
 
 ### `_render_ai_summary(session) -> None`
-- 仅 final 详情页用；缓存 key = `_story_{session_id}`，依赖全局 `llm_selected_model`
+- pending/final 详情页均可用；缓存 key = `_story_{session_id}`，依赖全局 `llm_selected_model`
 
 ### `_render_tag_manager() -> None` / `_render_group_manager() -> None`
 - 标签：禁删 `DEFAULT_TAGS`
@@ -123,8 +124,8 @@
 ### 已知陷阱
 
 - `upload_key` 自增是 streamlit 重置 file_uploader 的标准技巧——勿删
-- 上传时完整 AI Picker 只用 `description`，`feeling` 留空（此时用户还没填）；应用结果通过 `_ai_applied_tags_upload_ai` 合并进标签默认值
-- AI 补全组件只在上传文件 / 粘贴文字模式渲染；应用结果通过 `_ai_fill_pending_upload_fill` 合并进 `render_field_inputs("upload")` 默认值
+- 上传时完整 AI Picker 在标签 multiselect 前渲染，只用 `description`，`feeling` 留空；应用结果通过 `_ai_applied_tags_upload_ai` 合并进标签默认值
+- AI 补全组件只在上传文件 / 粘贴文字模式渲染；应用结果直接写入 `upload_feeling` / `upload_reason` widget state，随后表单渲染读取该值
 - 文件夹导入路径保存在 `folder_selected_path`；切换路径时清空 `folder_scan_results`
 - 文件夹扫描会按原始文件名排除已上传文件，并把跳过数量写入 `folder_scan_skipped_n`
 
@@ -267,7 +268,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **副作用**：
   - 调 `auto_tag_session` → 写 `_ai_tag_result_{state_key}`
   - 用户勾选 → 写 `_ai_tag_checked_{state_key}`
-  - 应用按钮 → 调 `add_tag()` 把 `updated` 中不在 registry 的标签写入 `tags_registry`，再写 `_ai_applied_tags_{state_key}` + `del st.session_state[apply_key]`
+  - 应用按钮 → 调 `add_tag()` 把 `updated` 中不在 registry 的标签写入 `tags_registry`，写 `_ai_applied_tags_{state_key}`，并把选中标签合并写入 `st.session_state[apply_key]`
 
 ### session_state 键空间约定
 
@@ -279,7 +280,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 
 ### 已知陷阱
 
-- 与 `cards._render_detail` 是**紧耦合**：`apply_key` 必须等于详情表单内 multiselect 的 widget key，否则应用无效
+- 与 `cards._render_detail` 是**紧耦合**：`apply_key` 必须等于目标标签 multiselect 的 widget key，否则前端无法自动勾选
 - 应用按钮按下时即调 `add_tag` 入库；`cards._render_detail` 的入库循环作为 belt-and-suspenders 兼职捕获 session 历史孤儿标签
 
 ## ai_fill.py
@@ -292,10 +293,10 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
   - `session_data: dict`：至少含 `description`
   - `model_id: str`：当前选中模型；空字符串时显示提示并 return
   - `state_key: str`：本组件独占的 session_state 命名空间（保证唯一）
-  - `form_prefix: str`：关联表单的 `render_field_inputs()` prefix；点击「应用」时清除 `{form_prefix}_feeling` / `{form_prefix}_reason`
+  - `form_prefix: str`：关联表单的 `render_field_inputs()` prefix；点击「应用」时写入 `{form_prefix}_feeling` / `{form_prefix}_reason`
 - **副作用**：
   - 调 `CompletionSkill().execute()` → 写 `_ai_fill_result_{state_key}`
-  - 用户应用 → 写 `_ai_fill_pending_{state_key}`，清除表单 widget state 后 `st.rerun()`
+  - 用户应用 → 直接写 `{form_prefix}_feeling` / `{form_prefix}_reason` widget state，清除建议后 `st.rerun()`
   - 用户重新生成 → 清除 `_ai_fill_result_{state_key}` 后 `st.rerun()`
 
 ### session_state 键空间约定
@@ -303,7 +304,6 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 | 模板 | 含义 |
 |------|------|
 | `_ai_fill_result_{state_key}` | LLM 返回的 `{feeling, reason}` 建议 |
-| `_ai_fill_pending_{state_key}` | 用户点击应用后的待合并字段值 |
 
 ### 已知陷阱
 
