@@ -148,3 +148,35 @@
 - `STORY_SINGLE_SYSTEM` / `STORY_SINGLE_USER_TMPL`：`{content_time, description, feeling, reason_section}`
 - `STORY_PERIOD_SYSTEM` / `STORY_PERIOD_USER_TMPL`：`{period, memories}`
 - 全部位于 `core/prompts.py`
+
+## completion_skill.py
+
+> 根据记录描述自动补全「感受」与「记录原因」。`SkillResult.data` 两字段：`feeling / reason`。
+
+### `class CompletionSkill(BaseSkill)`
+
+- `name = "CompletionSkill"` · `description = "根据描述自动补全感受与记录原因"`
+
+#### `execute(self, session_data: dict) -> SkillResult`
+- **入参（必填 dict 字段）**：
+  - `description`：记录描述，必须非空；调用 LLM 前截断到 800 字
+  - `model_id`：模型 ID，必须非空
+- **返回**：`SkillResult.data` 结构
+  ```
+  {
+    "feeling": str,
+    "reason":  str,
+  }
+  ```
+- **副作用**：调 `core/llm_client.call_llm`（JSON 模式，自动写 `llm_logs`，`skill_name="CompletionSkill"`）
+- **失败路径**（不抛异常，转 `SkillResult(success=False, error=...)`）：
+  - 缺 `model_id` / `description` 为空 / LLM 调用异常 / 返回非 dict / `feeling` 为空
+- **不变量**：`feeling` 为空时必须返回失败；`reason` 可为空字符串
+
+#### `run(self, session: dict, model_id: str = "", **kwargs) -> SkillResult`
+- 向后兼容：浅拷贝 `session` 后注入 `model_id`，委托给 `execute()`
+
+### Prompt 依赖
+
+- `core/prompts.COMPLETION_SYSTEM` / `COMPLETION_USER_TMPL`（变量 `{description}`）
+- 改 prompt 必须同步检查输出字段名（`feeling / reason`）
