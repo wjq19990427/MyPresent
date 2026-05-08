@@ -18,14 +18,14 @@
 
 ## 当前焦点
 
-- **task-4/7 merge** ✅：文件夹选择器+递归扫描 + 软删除DB层（12张表）
-- 进行中任务序列：task-5（排除已上传）→ task-6（AI Picker）→ task-8（删除按钮）→ task-9（回收站Tab）
+- **task-5/6/8 merge** ✅：扫描去重 + 完整 AI Picker + 软删除按钮
+- **下一步**：task-9（回收站 Tab + 操作记录）— 可立即派发
 - 已知技术债：`tab_search` 跨层调用 `vector_db._get_*`；`FIELD_SCHEMA` 增字段需手改 5 处
 
 ## 最近完成
 
-- **task-4 merge**：`_pick_folder_dialog` 替换手动路径，`rglob` 递归扫描
-- **task-7 merge**：`operation_logs` 表 + sessions 软删除列 + 6个 CRUD 函数
+- **task-5/6/8 merge**：文件夹扫描去重 + 记录舱完整 AI Picker + 详情面板软删除按钮
+- **task-4/7 merge**：文件夹选择器+递归扫描 + 软删除DB层（12张表）
 - **task-3 merge**：session ID 扩展至微秒精度，消除批量导入碰撞
 - **task-2 merge**：`tab_upload.py` AI 按钮 dict-vs-list 修复 + 新标签即入库
 
