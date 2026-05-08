@@ -20,6 +20,7 @@
 | `tab_search.py` | 「搜索」Tab（日期 + 语义 + 问答） | ✅ |
 | `eval_dashboard.py` | 「运行看板」Tab | ✅ |
 | `ai_tagging.py` | AI 打标 UI 组件 | ✅ |
+| `tab_recycle.py` | 「回收站」Tab | ✅ |
 
 ---
 
@@ -186,11 +187,11 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 
 ## eval_dashboard.py
 
-> 「📊 运行看板」Tab。LLM 配置管理 + 全局模型选择器 + 调用统计。
+> 「📊 运行看板」Tab。LLM 配置管理 + 全局模型选择器 + 调用统计 + 数据操作记录。
 
 ### `render_eval_dashboard() -> None`
-- 三段：API 配置（折叠）→ 模型选择器 → 调用统计（指标 + 按 Skill 分组 + 最近 N 条）
-- 数据来源：`get_llm_logs(limit=500)`
+- 四段：API 配置（折叠）→ 模型选择器 → 调用统计（指标 + 按 Skill 分组 + 最近 N 条）→ 数据操作记录
+- 数据来源：`get_llm_logs(limit=500)` / `get_operation_logs(limit=50)`
 
 ### `render_model_selector(widget_key="llm_model_select_dash") -> str | None`
 - **跨 Tab 共用**：搜索 Tab 的智能问答也调用此函数
@@ -213,6 +214,30 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - `_TEST_MESSAGE` 是固定测试字段（非随机 prompt），便于人工验证回复合理性
 - 测试调用走 `call_with_config`，**不**写 `llm_logs`（避免污染统计）
 - 删当前选中模型会自动清 `llm_selected_model`，但**不**强制刷新依赖此模型的页面
+
+---
+
+## tab_recycle.py
+
+> 「回收站」Tab。展示软删除记录，支持恢复与永久删除。
+
+### `render_recycle_tab() -> None`
+- **副作用**：
+  - Tab 加载时调用 `purge_expired_deleted(30)` 自动清理超期软删除记录
+  - 点击恢复 → `restore_session(sid)` + `st.rerun()`
+  - 点击永久删除 → 二次确认后删除磁盘文件、删除 `sessions` 行、写 `purge` 操作日志
+- **依赖**：`get_deleted_sessions` / `restore_session` / `purge_expired_deleted` / `log_operation`
+- **保留期**：`_KEEP_DAYS = 30`
+
+### 内部辅助
+
+- `_days_remaining(deleted_at)`：按 `deleted_at` 计算剩余保留天数，解析失败返回 30
+- `_purge_now(session_id)`：用户主动永久删除路径；删除文件和 DB 行，并保留操作日志
+
+### 已知陷阱
+
+- 永久删除不可恢复，必须保留二次确认
+- 自动清理走 `purge_expired_deleted`；用户主动永久删除在 UI 内补充处理
 
 ---
 

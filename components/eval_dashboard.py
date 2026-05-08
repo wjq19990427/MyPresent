@@ -9,6 +9,7 @@ from core.db_manager import (
     get_llm_logs, get_llm_models, get_llm_providers,
     add_llm_provider, remove_llm_provider, update_llm_provider,
     add_llm_model, remove_llm_model, update_llm_model,
+    get_operation_logs,
 )
 from core.llm_client import call_with_config
 
@@ -338,6 +339,26 @@ def render_model_selector(widget_key: str = "llm_model_select_dash") -> str | No
     return st.session_state.get("llm_selected_model")
 
 
+def _render_operation_logs() -> None:
+    st.divider()
+    st.subheader("📋 数据操作记录")
+    op_logs = get_operation_logs(limit=50)
+    if op_logs:
+        op_label = {
+            "create": "➕ 新建",
+            "update": "✏️ 更新",
+            "archive": "📁 归档",
+            "delete": "🗑️ 删除",
+            "restore": "↩️ 恢复",
+            "purge": "💥 永久删除",
+        }
+        for log in op_logs:
+            op = op_label.get(log["operation"], log["operation"])
+            st.caption(f"{log['operated_at']}　{op}　`{log['session_id'][:16]}…`")
+    else:
+        st.caption("暂无操作记录")
+
+
 # ─── 看板主入口 ─────────────────────────────────────────────────────────────────────
 
 def render_eval_dashboard() -> None:
@@ -358,6 +379,7 @@ def render_eval_dashboard() -> None:
     logs = get_llm_logs(limit=500)
     if not logs:
         st.info("暂无调用记录。使用「AI 推荐标签」或「AI 摘要」功能后，数据将显示在这里。")
+        _render_operation_logs()
         return
 
     models_map    = {m["id"]: m["display_name"] for m in get_llm_models()}
@@ -425,3 +447,5 @@ def render_eval_dashboard() -> None:
         cols[4].write(ts)
         if err:
             st.caption(f"  ⚠️ {err[:100]}")
+
+    _render_operation_logs()
