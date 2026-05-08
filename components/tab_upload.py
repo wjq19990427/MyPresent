@@ -18,21 +18,46 @@ def _pasted_filename(text: str) -> str:
     return f"{safe}.txt" if safe else "paste.txt"
 
 
+def _pick_folder_dialog() -> str:
+    import tkinter as tk
+    from tkinter import filedialog
+    root = tk.Tk()
+    root.withdraw()
+    root.wm_attributes("-topmost", True)
+    folder = filedialog.askdirectory(title="选择导入文件夹")
+    root.destroy()
+    return folder or ""
+
+
 def _render_folder_import() -> None:
     done = st.session_state.get("folder_import_done", 0)
     if done:
         st.success(f"✅ 已成功导入 **{done}** 条记录到灵感墙！")
         st.session_state["folder_import_done"] = 0
 
-    folder_str = st.text_input(
-        "文件夹路径",
-        placeholder=r"例：C:\Users\xxx\Pictures  或  /home/xxx/photos",
-        key="folder_path_input",
-    )
+    folder_str: str = st.session_state.get("folder_selected_path", "")
+    col_pick, col_disp = st.columns([1, 3])
+    with col_pick:
+        if st.button("📂 选择文件夹", key="pick_folder_btn"):
+            picked = _pick_folder_dialog()
+            if picked:
+                st.session_state["folder_selected_path"] = picked
+                st.session_state["folder_scan_results"]  = []
+                st.rerun()
+    with col_disp:
+        if folder_str:
+            st.caption(f"已选：`{folder_str}`")
+        else:
+            st.caption("请点击左侧按钮选择文件夹")
 
     c_scan, c_mode = st.columns([1, 2])
     with c_scan:
-        do_scan = st.button("🔍 扫描文件夹", type="primary", key="scan_folder_btn")
+        do_scan = st.button(
+            "🔍 扫描文件夹",
+            type="primary",
+            key="scan_folder_btn",
+            disabled=not folder_str,
+        )
     with c_mode:
         import_mode = st.radio(
             "导入方式",
@@ -42,21 +67,16 @@ def _render_folder_import() -> None:
         )
 
     if do_scan:
-        if not folder_str.strip():
-            st.warning("请先输入文件夹路径")
+        folder = Path(folder_str)
+        if not folder.is_dir():
+            st.error("该路径不是文件夹")
         else:
-            folder = Path(folder_str.strip())
-            if not folder.exists():
-                st.error("路径不存在，请检查是否填写正确")
-            elif not folder.is_dir():
-                st.error("该路径不是文件夹")
-            else:
-                found = sorted(
-                    [f for f in folder.iterdir()
-                     if f.is_file() and f.suffix.lower() in SUPPORTED_IMPORT_EXTS],
-                    key=lambda p: p.name,
-                )
-                st.session_state["folder_scan_results"] = [str(f) for f in found]
+            found = sorted(
+                [f for f in folder.rglob("*")
+                 if f.is_file() and f.suffix.lower() in SUPPORTED_IMPORT_EXTS],
+                key=lambda p: p.name,
+            )
+            st.session_state["folder_scan_results"] = [str(f) for f in found]
 
     scan_results: list[str] = st.session_state.get("folder_scan_results", [])
     if not scan_results:

@@ -100,7 +100,8 @@
 ### 内部子组件
 
 - `_pasted_filename(text) -> str`：粘贴模式自动生成文件名（首行前 20 字符 + `.txt`）
-- `_render_folder_import()`：扫描 → multiselect → 模式选择（独立 / 合并） → 导入
+- `_pick_folder_dialog() -> str`：调用 Windows 文件夹选择器，取消时返回空字符串
+- `_render_folder_import()`：选择文件夹 → 递归扫描 → multiselect → 模式选择（独立 / 合并） → 导入
 
 ### 强制约束
 
@@ -112,6 +113,7 @@
 
 - `upload_key` 自增是 streamlit 重置 file_uploader 的标准技巧——勿删
 - 上传时「✨ AI」打标只用 `description`，`feeling` 留空（此时用户还没填）
+- 文件夹导入路径保存在 `folder_selected_path`；切换路径时清空 `folder_scan_results`
 
 ---
 
