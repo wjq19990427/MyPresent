@@ -337,7 +337,7 @@
 - **选择状态**：`pending_selected` / `archived_selected` / `search_selected`
 - **搜索**：`semantic_results` / `semantic_query_used` / `date_filter_exact` / `_fuzzy` / `_range` / `_search_mode_prev`
 - **已归档过滤**：`archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`
-- **文件夹批量导入**：`folder_selected_path` / `folder_scan_results` / `folder_import_done`
+- **文件夹批量导入**：`folder_selected_path` / `folder_scan_results` / `folder_scan_skipped_n` / `folder_import_done`
 - **智能问答**：`llm_selected_model` / `llm_chat_history`
 - **LLM 配置编辑**：`_editing_pvd` / `_editing_mdl` / `_draft_provider` / `_draft_model` / `_test_result` / `_draft_test_passed` / `_confirm_edit_pvd` / `_confirm_edit_mdl`
 - **杂项**：`upload_key`

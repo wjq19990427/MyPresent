@@ -21,6 +21,7 @@ def init_state() -> None:
         "archived_group_filter": None,
         "folder_selected_path":  "",
         "folder_scan_results":   [],
+        "folder_scan_skipped_n": 0,
         "folder_import_done":    0,
         "_show_no_tag_only":     False,
         # 智能问答

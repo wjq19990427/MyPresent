@@ -6,10 +6,10 @@ from pathlib import Path
 import streamlit as st
 
 from core.constants import TEXT_EXTS, SUPPORTED_IMPORT_EXTS, FIELD_SCHEMA
-from core.db_manager import get_tags_registry, validate_session, add_tag
+from core.db_manager import get_tags_registry, validate_session
 from core.file_io import save_session_pending, save_session_final, import_folder_to_pending
 from components.forms import render_field_inputs
-from skills.tagging_skill import auto_tag_session
+from components.ai_tagging import render_ai_tag_picker
 
 
 def _pasted_filename(text: str) -> str:
@@ -27,6 +27,23 @@ def _pick_folder_dialog() -> str:
     folder = filedialog.askdirectory(title="选择导入文件夹")
     root.destroy()
     return folder or ""
+
+
+def _get_uploaded_filenames() -> set[str]:
+    """返回 data/pending/ 和 data/final/ 中已存储文件的原始文件名集合。"""
+    import re
+    from core.constants import PENDING_DIR, FINAL_DIR
+    result: set[str] = set()
+    for d in (PENDING_DIR, FINAL_DIR):
+        if not d.exists():
+            continue
+        for f in d.rglob("*"):
+            if not f.is_file():
+                continue
+            m = re.search(r"_\d{3}_(.+)$", f.name)
+            if m:
+                result.add(m.group(1))
+    return result
 
 
 def _render_folder_import() -> None:
@@ -76,13 +93,23 @@ def _render_folder_import() -> None:
                  if f.is_file() and f.suffix.lower() in SUPPORTED_IMPORT_EXTS],
                 key=lambda p: p.name,
             )
-            st.session_state["folder_scan_results"] = [str(f) for f in found]
+            uploaded  = _get_uploaded_filenames()
+            filtered  = [f for f in found if f.name not in uploaded]
+            skipped_n = len(found) - len(filtered)
+            st.session_state["folder_scan_results"]   = [str(f) for f in filtered]
+            st.session_state["folder_scan_skipped_n"] = skipped_n
 
     scan_results: list[str] = st.session_state.get("folder_scan_results", [])
     if not scan_results:
+        if st.session_state.get("folder_scan_skipped_n", 0):
+            st.caption("该文件夹内所有文件均已上传")
+            return
         st.caption("支持格式：图片（jpg/png/gif/webp/bmp）、视频（mp4/mov/avi 等）、文本（txt/md）")
         return
 
+    skipped_n = st.session_state.get("folder_scan_skipped_n", 0)
+    if skipped_n:
+        st.caption(f"⚠️ 已自动跳过 **{skipped_n}** 个文件名与已上传记录重复的文件")
     st.markdown(f"扫描到 **{len(scan_results)}** 个支持格式的文件，请勾选要导入的内容：")
 
     file_names     = [Path(p).name for p in scan_results]
@@ -129,6 +156,7 @@ def _render_folder_import() -> None:
 
     if st.button("清除扫描结果", key="clear_scan_btn"):
         st.session_state["folder_scan_results"] = []
+        st.session_state["folder_scan_skipped_n"] = 0
         st.rerun()
 
 
@@ -194,37 +222,25 @@ def render_upload_tab() -> None:
 
     st.divider()
     st.markdown("**🏷️ 标签** **\\*（必填）**")
-    tag_col, ai_col = st.columns([5, 1])
-    with tag_col:
-        upload_tags = st.multiselect(
-            "标签",
-            options=get_tags_registry(),
-            key=f"upload_tags_{st.session_state.upload_key}",
-            label_visibility="collapsed",
-            placeholder="至少选择一个标签",
-        )
-    with ai_col:
-        model_id  = st.session_state.get("llm_selected_model") or ""
-        ai_ready  = bool(model_id)
-        if st.button(
-            "✨ AI",
-            key="upload_ai_tag_btn",
-            disabled=not ai_ready,
-            help="在「运行看板」Tab 选择模型后可自动推荐标签" if not ai_ready else "AI 推荐标签",
-        ):
-            with st.spinner("AI 推荐标签中…"):
-                suggestions = auto_tag_session(
-                    {"description": auto_description, "feeling": ""},
-                    model_id=model_id,
-                )
-            combined = suggestions["suggested_tags"] + suggestions["new_tags"]
-            if combined:
-                for tag in suggestions["new_tags"]:
-                    add_tag(tag)
-                st.session_state[f"upload_tags_{st.session_state.upload_key}"] = combined
-                st.rerun()
-            else:
-                st.warning("未能推荐到标签，请手动选择")
+    upload_ai_key = "upload_ai"
+    upload_tags_key = f"upload_tags_{st.session_state.upload_key}"
+    ai_applied_tags = st.session_state.get(f"_ai_applied_tags_{upload_ai_key}", [])
+    tag_options = get_tags_registry()
+    upload_tags = st.multiselect(
+        "标签",
+        options=tag_options,
+        default=[t for t in ai_applied_tags if t in tag_options],
+        key=upload_tags_key,
+        label_visibility="collapsed",
+        placeholder="至少选择一个标签",
+    )
+    model_id = st.session_state.get("llm_selected_model") or ""
+    render_ai_tag_picker(
+        session_data={"description": auto_description, "feeling": ""},
+        model_id=model_id,
+        state_key=upload_ai_key,
+        apply_key=upload_tags_key,
+    )
 
     with st.form("upload_meta_form"):
         st.markdown("### 📋 填写记录信息")
