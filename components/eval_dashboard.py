@@ -178,16 +178,19 @@ def _render_llm_settings() -> None:
             )
             nm_name = st.text_input("模型 ID", key="nm_name", placeholder="gpt-4o-mini")
             nm_disp = st.text_input("显示名称（留空同模型 ID）", key="nm_disp", placeholder="GPT-4o Mini")
-            if st.button("添加模型", key="add_mdl_btn", type="primary"):
+            if st.button("🧪 开始测试", key="add_mdl_btn", type="primary"):
                 if nm_name and nm_pvd:
-                    try:
-                        add_llm_model(nm_name, nm_pvd, nm_disp)
-                        for k in ("nm_name", "nm_disp"):
-                            st.session_state.pop(k, None)
-                        st.success("模型已添加")
+                    pvd = next((p for p in providers if p["id"] == nm_pvd), None)
+                    if pvd:
+                        _enter_draft(
+                            provider={**pvd, "_id": pvd["id"], "_readonly": True},
+                            model={
+                                "name":         nm_name.strip(),
+                                "display_name": nm_disp.strip() or nm_name.strip(),
+                                "provider_id":  nm_pvd,
+                            },
+                        )
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"添加失败：{e}")
                 else:
                     st.warning("请填写模型 ID 并选择 Provider")
 
