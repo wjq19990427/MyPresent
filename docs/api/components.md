@@ -20,6 +20,7 @@
 | `tab_search.py` | 「搜索」Tab（日期 + 语义 + 问答） | ✅ |
 | `eval_dashboard.py` | 「运行看板」Tab | ✅ |
 | `ai_tagging.py` | AI 打标 UI 组件 | ✅ |
+| `ai_fill.py` | AI 感受/原因补全 UI 组件 | ✅ |
 | `tab_recycle.py` | 「回收站」Tab | ✅ |
 
 ---
@@ -50,8 +51,9 @@
   - 删除按钮 → `soft_delete_session(sid)`，清空选中态并关闭详情面板
   - 纯文字 session 直接重写源 .txt 文件
   - AI 推荐的新标签在保存时通过 `add_tag` 自动入库
-- **依赖组件**：`forms.render_field_inputs` / `ai_tagging.render_ai_tag_picker` / `_render_ai_summary` / `_render_comments`
+- **依赖组件**：`forms.render_field_inputs` / `ai_fill.render_ai_fill_picker` / `ai_tagging.render_ai_tag_picker` / `_render_ai_summary` / `_render_comments`
 - **已知陷阱**：widget key 用 `safe_sid = "".join(c if c.isalnum() else "_" for c in sid)` 净化，避免 streamlit 对特殊字符报错
+- **AI 补全**：在 form 外渲染；`state_key=f"fill_{safe_sid}"`，`form_prefix=f"edit_{safe_sid}"`；应用后读取 `_ai_fill_pending_fill_{safe_sid}` 合并到表单 defaults
 
 ### `_render_comments(session) -> None`
 - **必须**在 `st.form` 外调用（依赖 `st.button` 即时回写）
@@ -122,6 +124,7 @@
 
 - `upload_key` 自增是 streamlit 重置 file_uploader 的标准技巧——勿删
 - 上传时完整 AI Picker 只用 `description`，`feeling` 留空（此时用户还没填）；应用结果通过 `_ai_applied_tags_upload_ai` 合并进标签默认值
+- AI 补全组件只在上传文件 / 粘贴文字模式渲染；应用结果通过 `_ai_fill_pending_upload_fill` 合并进 `render_field_inputs("upload")` 默认值
 - 文件夹导入路径保存在 `folder_selected_path`；切换路径时清空 `folder_scan_results`
 - 文件夹扫描会按原始文件名排除已上传文件，并把跳过数量写入 `folder_scan_skipped_n`
 
@@ -278,3 +281,31 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 
 - 与 `cards._render_detail` 是**紧耦合**：`apply_key` 必须等于详情表单内 multiselect 的 widget key，否则应用无效
 - 应用按钮按下时即调 `add_tag` 入库；`cards._render_detail` 的入库循环作为 belt-and-suspenders 兼职捕获 session 历史孤儿标签
+
+## ai_fill.py
+
+> 「AI 补全感受与原因」交互组件。基于 `CompletionSkill().execute()`。
+
+### `render_ai_fill_picker(session_data, model_id, state_key, form_prefix) -> None`
+- **必须**在 `st.form` 外调用（依赖 `st.button` 即时回写）
+- **入参**：
+  - `session_data: dict`：至少含 `description`
+  - `model_id: str`：当前选中模型；空字符串时显示提示并 return
+  - `state_key: str`：本组件独占的 session_state 命名空间（保证唯一）
+  - `form_prefix: str`：关联表单的 `render_field_inputs()` prefix；点击「应用」时清除 `{form_prefix}_feeling` / `{form_prefix}_reason`
+- **副作用**：
+  - 调 `CompletionSkill().execute()` → 写 `_ai_fill_result_{state_key}`
+  - 用户应用 → 写 `_ai_fill_pending_{state_key}`，清除表单 widget state 后 `st.rerun()`
+  - 用户重新生成 → 清除 `_ai_fill_result_{state_key}` 后 `st.rerun()`
+
+### session_state 键空间约定
+
+| 模板 | 含义 |
+|------|------|
+| `_ai_fill_result_{state_key}` | LLM 返回的 `{feeling, reason}` 建议 |
+| `_ai_fill_pending_{state_key}` | 用户点击应用后的待合并字段值 |
+
+### 已知陷阱
+
+- 与 `render_field_inputs` 的 prefix 紧耦合：上传表单传 `upload`；详情表单传 `edit_{safe_sid}`
+- 文件夹导入模式不渲染此组件，因为没有可用描述

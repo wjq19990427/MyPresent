@@ -20,6 +20,7 @@ from core.db_manager import (
 from core.file_io import _write_md, move_to_final
 from core.media import video_thumbnail, pil_to_png_bytes
 from components.forms import render_field_inputs
+from components.ai_fill import render_ai_fill_picker
 from components.ai_tagging import render_ai_tag_picker
 
 
@@ -285,6 +286,19 @@ def _render_detail(
         except OSError:
             current_text_body = str(session.get("description", ""))
 
+    model_id = st.session_state.get("llm_selected_model") or ""
+    fill_state_key = f"fill_{safe_sid}"
+    fill_session = {
+        **session,
+        "description": current_text_body if is_text else session.get("description", ""),
+    }
+    render_ai_fill_picker(
+        session_data=fill_session,
+        model_id=model_id,
+        state_key=fill_state_key,
+        form_prefix=edit_prefix,
+    )
+
     with st.form(f"form_{safe_sid}"):
         st.markdown("#### ✏️ 编辑字段")
 
@@ -300,7 +314,9 @@ def _render_detail(
         else:
             text_body = ""
 
-        field_values = render_field_inputs(edit_prefix, defaults=session, skip_keys=skip_keys)
+        pending_fill = st.session_state.pop(f"_ai_fill_pending_{fill_state_key}", None)
+        merged = {**session, **(pending_fill or {})}
+        field_values = render_field_inputs(edit_prefix, defaults=merged, skip_keys=skip_keys)
         if is_text:
             field_values["description"] = text_body
 
@@ -415,7 +431,6 @@ def _render_detail(
         st.rerun()
 
     if mode == "final":
-        model_id = st.session_state.get("llm_selected_model") or ""
         render_ai_tag_picker(
             session_data=session,
             model_id=model_id,
