@@ -18,15 +18,15 @@
 
 ## 当前焦点
 
-- **task-4~9 全部完成** ✅：文件夹导入优化 + AI Picker + 软删除回收站
+- **task-10~14b 全部完成** ✅：回收站预览 + 批量管理 + 看板筛选 + API测试 + AI补全
 - 已知技术债：`tab_search` 跨层调用 `vector_db._get_*`；`FIELD_SCHEMA` 增字段需手改 5 处
 
 ## 最近完成
 
-- **task-9 merge**：回收站 Tab（恢复/永久删除/自动清理）+ 运行看板操作记录
-- **task-5/6/8 merge**：文件夹扫描去重 + 记录舱完整 AI Picker + 详情面板软删除按钮
-- **task-4/7 merge**：文件夹选择器+递归扫描 + 软删除DB层（12张表 + operation_logs）
-- **task-2/3 merge**：AI 按钮 dict 修复 + session ID 微秒精度
+- **task-14a/b merge**：`CompletionSkill` + `render_ai_fill_picker` 三处集成
+- **task-10/11/12/13 merge**：回收站内容预览、批量管理、看板筛选、追加模型测试流程
+- **task-9 merge**：回收站 Tab + 运行看板操作记录
+- **task-4~8 merge**：文件夹导入优化 + AI Picker + 软删除体系
 
 ## 待办 / TODO
 
