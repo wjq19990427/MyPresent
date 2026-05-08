@@ -39,7 +39,7 @@
 ### Session CRUD
 
 #### `load_db() -> list[dict]`
-- **返回**：所有 session（按 `upload_time DESC`），每条含 `files / tags / group_ids / edit_history / comments`
+- **返回**：所有未软删除 session（按 `upload_time DESC`），每条含 `files / tags / group_ids / edit_history / comments`
 - **副作用**：无
 
 #### `get_session(session_id: str) -> dict | None`
@@ -68,6 +68,24 @@
 
 #### `set_session_status(session_id, status, archive_time='', is_complete=1) -> None`
 - **副作用**：更新 `sessions` 三个字段；不触发任何 hook
+
+#### `log_operation(session_id: str, operation: str) -> None`
+- **副作用**：插入 `operation_logs`；`operation` 约定为 `create/update/archive/delete/restore/purge`
+
+#### `get_operation_logs(limit: int = 100) -> list[dict]`
+- **返回**：按 `operated_at DESC` 排序的操作日志 dict 列表
+
+#### `soft_delete_session(session_id: str) -> None`
+- **副作用**：将 session 标记为 `status='deleted'`，写入 `deleted_at` / `pre_delete_status`，best-effort 删除向量索引，记录 `delete` 操作日志；不删除磁盘文件
+
+#### `restore_session(session_id: str) -> None`
+- **副作用**：将软删除 session 恢复到 `pre_delete_status`；若恢复为 final，best-effort 重建向量索引；记录 `restore` 操作日志
+
+#### `get_deleted_sessions() -> list[dict]`
+- **返回**：所有 `status='deleted'` 的 session，按 `deleted_at DESC` 排序
+
+#### `purge_expired_deleted(days: int = 30) -> int`
+- **副作用**：永久删除超过 `days` 天的软删除 session 及其磁盘文件，保留 `operation_logs` 审计记录；返回删除数量
 
 ### 校验
 
@@ -319,7 +337,7 @@
 - **选择状态**：`pending_selected` / `archived_selected` / `search_selected`
 - **搜索**：`semantic_results` / `semantic_query_used` / `date_filter_exact` / `_fuzzy` / `_range` / `_search_mode_prev`
 - **已归档过滤**：`archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`
-- **文件夹批量导入**：`folder_scan_results` / `folder_import_done`
+- **文件夹批量导入**：`folder_selected_path` / `folder_scan_results` / `folder_import_done`
 - **智能问答**：`llm_selected_model` / `llm_chat_history`
 - **LLM 配置编辑**：`_editing_pvd` / `_editing_mdl` / `_draft_provider` / `_draft_model` / `_test_result` / `_draft_test_passed` / `_confirm_edit_pvd` / `_confirm_edit_mdl`
 - **杂项**：`upload_key`

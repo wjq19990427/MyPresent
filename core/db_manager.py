@@ -30,7 +30,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     reason       TEXT    DEFAULT '',
     is_complete  INTEGER NOT NULL DEFAULT 0,
     upload_time  TEXT    NOT NULL,
-    archive_time TEXT    DEFAULT ''
+    archive_time TEXT    DEFAULT '',
+    deleted_at   TEXT,
+    pre_delete_status TEXT
 );
 
 CREATE TABLE IF NOT EXISTS session_files (
@@ -104,6 +106,13 @@ CREATE TABLE IF NOT EXISTS llm_logs (
     error_message     TEXT,
     created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS operation_logs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT    NOT NULL,
+    operation    TEXT    NOT NULL,
+    operated_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
+);
 """
 
 
@@ -111,6 +120,11 @@ def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
         conn.executescript(_SCHEMA)
+        _cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
+        if "deleted_at" not in _cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN deleted_at TEXT")
+        if "pre_delete_status" not in _cols:
+            conn.execute("ALTER TABLE sessions ADD COLUMN pre_delete_status TEXT")
         # 初始化默认标签
         for tag in DEFAULT_TAGS:
             conn.execute(
@@ -202,6 +216,8 @@ def _row_to_dict(row: sqlite3.Row, aux: tuple) -> dict:
         "is_complete":  bool(row["is_complete"]),
         "upload_time":  row["upload_time"],
         "archive_time": row["archive_time"]  or "",
+        "deleted_at":   row["deleted_at"]    or "",
+        "pre_delete_status": row["pre_delete_status"] or "",
         "files":        files,
         "tags":         tags,
         "group_ids":    group_ids,
@@ -216,7 +232,7 @@ def load_db() -> list[dict]:
     """返回所有 session 的 dict 列表（与原 db.py 接口兼容）。"""
     with _conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM sessions ORDER BY upload_time DESC"
+            "SELECT * FROM sessions WHERE status != 'deleted' ORDER BY upload_time DESC"
         ).fetchall()
         return [_row_to_dict(r, _load_aux(conn, r["id"])) for r in rows]
 
@@ -633,3 +649,95 @@ def get_llm_logs(limit: int = 200) -> list[dict]:
                 "SELECT * FROM llm_logs ORDER BY id DESC LIMIT ?", (limit,)
             )
         ]
+
+
+def log_operation(session_id: str, operation: str) -> None:
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO operation_logs(session_id, operation) VALUES (?,?)",
+            (session_id, operation),
+        )
+
+
+def get_operation_logs(limit: int = 100) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM operation_logs ORDER BY operated_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def soft_delete_session(session_id: str) -> None:
+    """软删除：标记 status='deleted'，保留文件，写入 deleted_at。"""
+    session = get_session(session_id)
+    if not session:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE sessions SET status='deleted', pre_delete_status=?, deleted_at=? WHERE id=?",
+            (session["status"], now, session_id),
+        )
+    try:
+        from .vector_db import delete_embedding
+        delete_embedding(session_id)
+    except Exception:
+        pass
+    log_operation(session_id, "delete")
+
+
+def restore_session(session_id: str) -> None:
+    """从回收站恢复到删除前的 status；final 记录重新入向量库。"""
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT pre_delete_status FROM sessions WHERE id=? AND status='deleted'",
+            (session_id,),
+        ).fetchone()
+        if not row:
+            return
+        prev = row["pre_delete_status"] or "pending"
+        conn.execute(
+            "UPDATE sessions SET status=?, deleted_at=NULL, pre_delete_status=NULL WHERE id=?",
+            (prev, session_id),
+        )
+    if prev == "final":
+        session = get_session(session_id)
+        if session:
+            from .vector_db import embed_session
+            try:
+                embed_session(session)
+            except Exception:
+                pass
+    log_operation(session_id, "restore")
+
+
+def get_deleted_sessions() -> list[dict]:
+    """返回所有软删除记录（含 deleted_at）。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM sessions WHERE status='deleted' ORDER BY deleted_at DESC"
+        ).fetchall()
+        return [_row_to_dict(r, _load_aux(conn, r["id"])) for r in rows]
+
+
+def purge_expired_deleted(days: int = 30) -> int:
+    """永久删除超过 days 天的软删除记录（含磁盘文件）。返回删除数量。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT id FROM sessions
+                WHERE status='deleted'
+                AND deleted_at <= datetime('now', 'localtime', '-{days} days')"""
+        ).fetchall()
+        ids = [r["id"] for r in rows]
+    for sid in ids:
+        session = get_session(sid)
+        if session:
+            for f in session.get("files", []):
+                path = Path(f.get("path", ""))
+                if path.exists():
+                    path.unlink(missing_ok=True)
+        log_operation(sid, "purge")
+        with _conn() as conn:
+            conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
+    return len(ids)

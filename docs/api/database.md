@@ -3,7 +3,7 @@
 > `data/database.db` · WAL 模式 · `PRAGMA foreign_keys=ON`
 > Schema 单一信息源：`core/db_manager.py::_SCHEMA`
 
-## 表清单（实际 11 张）
+## 表清单（实际 12 张）
 
 | # | 表 | 主键 | 职责 | 契约状态 |
 |---|----|------|------|----------|
@@ -18,8 +18,7 @@
 | 9 | `llm_providers` | `id` (TEXT) | LLM 提供方 | ✅ |
 | 10 | `llm_models` | `id` (TEXT) | 模型（→ provider） | ✅ |
 | 11 | `llm_logs` | autoinc | LLM 调用日志 | ✅ |
-
-> ⚠️ CHANGELOG v4.0.0 写「12 张表」，**实际只有 11 张**。CHANGELOG 待修正。
+| 12 | `operation_logs` | autoinc | session 操作审计日志 | ✅ |
 
 ---
 
@@ -30,7 +29,7 @@
 | 字段 | 类型 | 约束 | 说明 |
 |------|------|------|------|
 | `id` | TEXT | **PK** | session_id（外部生成，时间戳前缀） |
-| `status` | TEXT | NOT NULL, default `'pending'` | `'pending'` / `'final'` |
+| `status` | TEXT | NOT NULL, default `'pending'` | `'pending'` / `'final'` / `'deleted'` |
 | `source_type` | TEXT | NOT NULL, default `'file'` | `'file'` / `'text'` / `'folder'` |
 | `content_time` | TEXT | default `''` | 用户填写的内容时间（自由格式） |
 | `description` | TEXT | default `''` | 描述（纯文字记录时为正文） |
@@ -39,6 +38,8 @@
 | `is_complete` | INTEGER | NOT NULL, default `0` | 必填项是否齐全（0/1） |
 | `upload_time` | TEXT | NOT NULL | `YYYY-MM-DD HH:MM:SS` |
 | `archive_time` | TEXT | default `''` | 归档时刻；pending 为空 |
+| `deleted_at` | TEXT | 可空 | 软删除时刻 |
+| `pre_delete_status` | TEXT | 可空 | 软删除前状态，用于恢复 |
 
 ### 2. session_files
 
@@ -140,6 +141,17 @@
 
 ⚠️ **故意不加 FK**：保留历史调用记录，模型/Provider 删除不影响审计。
 
+### 12. operation_logs
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| `id` | INTEGER | PK autoinc |
+| `session_id` | TEXT | NOT NULL（**无 FK**，session 永久删除后日志保留） |
+| `operation` | TEXT | NOT NULL，枚举：`create` / `update` / `archive` / `delete` / `restore` / `purge` |
+| `operated_at` | TEXT | NOT NULL, default `strftime('%Y-%m-%d %H:%M:%S','now','localtime')` |
+
+⚠️ **故意不加 FK**：保留审计历史，session 永久删除不影响操作日志。
+
 ---
 
 ## 跨表不变量
@@ -147,4 +159,5 @@
 - 删除 `sessions` 行 → 级联删除 `session_files` / `session_tags` / `session_groups` / `edit_history` / `comments`
 - 删除 `groups` 行 → 级联删除 `session_groups`（`update_session_fields` 调用方仍需自行清理 UI 选择状态）
 - 删除 `llm_providers` 行 → 级联删除 `llm_models`，但 `llm_logs` 保留
+- 软删除 session 只改 `sessions.status/deleted_at/pre_delete_status`，不触发级联删除；永久删除才触发级联
 - 所有事务通过 `_conn()` 上下文管理器，异常自动 rollback
