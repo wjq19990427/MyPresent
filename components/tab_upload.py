@@ -221,20 +221,8 @@ def render_upload_tab() -> None:
 
     skip = {"description"} if is_text_content else set()
 
-    st.divider()
-    st.markdown("**🏷️ 标签** **\\*（必填）**")
     upload_ai_key = "upload_ai"
     upload_tags_key = f"upload_tags_{st.session_state.upload_key}"
-    ai_applied_tags = st.session_state.get(f"_ai_applied_tags_{upload_ai_key}", [])
-    tag_options = get_tags_registry()
-    upload_tags = st.multiselect(
-        "标签",
-        options=tag_options,
-        default=[t for t in ai_applied_tags if t in tag_options],
-        key=upload_tags_key,
-        label_visibility="collapsed",
-        placeholder="至少选择一个标签",
-    )
     model_id = st.session_state.get("llm_selected_model") or ""
     render_ai_tag_picker(
         session_data={"description": auto_description, "feeling": ""},
@@ -247,6 +235,19 @@ def render_upload_tab() -> None:
         model_id=model_id,
         state_key="upload_fill",
         form_prefix="upload",
+    )
+
+    st.divider()
+    st.markdown("**🏷️ 标签** **\\*（必填）**")
+    ai_applied_tags = st.session_state.get(f"_ai_applied_tags_{upload_ai_key}", [])
+    tag_options = get_tags_registry()
+    upload_tags = st.multiselect(
+        "标签",
+        options=tag_options,
+        default=[t for t in ai_applied_tags if t in tag_options],
+        key=upload_tags_key,
+        label_visibility="collapsed",
+        placeholder="至少选择一个标签",
     )
 
     with st.form("upload_meta_form"):

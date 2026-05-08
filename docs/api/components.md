@@ -53,7 +53,7 @@
   - AI 推荐的新标签在保存时通过 `add_tag` 自动入库
 - **依赖组件**：`forms.render_field_inputs` / `ai_fill.render_ai_fill_picker` / `ai_tagging.render_ai_tag_picker` / `_render_ai_summary` / `_render_comments`
 - **已知陷阱**：widget key 用 `safe_sid = "".join(c if c.isalnum() else "_" for c in sid)` 净化，避免 streamlit 对特殊字符报错
-- **AI 补全**：在 form 外渲染；`state_key=f"fill_{safe_sid}"`，`form_prefix=f"edit_{safe_sid}"`；应用后直接写入 `{form_prefix}_feeling` / `{form_prefix}_reason` widget state
+- **AI 补全 / AI 标签**：都在编辑 form 之前渲染；补全应用后直接写入 `{form_prefix}_feeling` / `{form_prefix}_reason`，标签应用后清除标签 multiselect state 并用 `_ai_applied_tags_*` 合并默认值
 
 ### `_render_comments(session) -> None`
 - **必须**在 `st.form` 外调用（依赖 `st.button` 即时回写）
@@ -123,8 +123,8 @@
 ### 已知陷阱
 
 - `upload_key` 自增是 streamlit 重置 file_uploader 的标准技巧——勿删
-- 上传时完整 AI Picker 只用 `description`，`feeling` 留空（此时用户还没填）；应用结果通过 `_ai_applied_tags_upload_ai` 合并进标签默认值
-- AI 补全组件只在上传文件 / 粘贴文字模式渲染；应用结果直接写入 `upload_feeling` / `upload_reason` widget state
+- 上传时完整 AI Picker 在标签 multiselect 前渲染，只用 `description`，`feeling` 留空；应用结果通过 `_ai_applied_tags_upload_ai` 合并进标签默认值
+- AI 补全组件只在上传文件 / 粘贴文字模式渲染；应用结果直接写入 `upload_feeling` / `upload_reason` widget state，随后表单渲染读取该值
 - 文件夹导入路径保存在 `folder_selected_path`；切换路径时清空 `folder_scan_results`
 - 文件夹扫描会按原始文件名排除已上传文件，并把跳过数量写入 `folder_scan_skipped_n`
 

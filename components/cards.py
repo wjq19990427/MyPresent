@@ -274,8 +274,6 @@ def _render_detail(
     skip_keys        = {"description"} if is_text else set()
     ai_picker_key    = f"ai_tags_{sid}"
     tags_widget_key  = f"tags_{safe_sid}"
-    # AI 标签组件应用过来的标签（点击「应用到标签栏」后写入）
-    ai_applied_tags  = st.session_state.get(f"_ai_applied_tags_{ai_picker_key}", [])
 
     text_file_path    = None
     current_text_body = ""
@@ -298,6 +296,15 @@ def _render_detail(
         state_key=fill_state_key,
         form_prefix=edit_prefix,
     )
+    render_ai_tag_picker(
+        session_data=fill_session,
+        model_id=model_id,
+        state_key=ai_picker_key,
+        apply_key=tags_widget_key,
+    )
+
+    # AI 标签组件应用过来的标签（点击「应用到标签栏」后写入）
+    ai_applied_tags  = st.session_state.get(f"_ai_applied_tags_{ai_picker_key}", [])
 
     with st.form(f"form_{safe_sid}"):
         st.markdown("#### ✏️ 编辑字段")
@@ -428,12 +435,6 @@ def _render_detail(
         st.session_state[state_key] = None
         st.rerun()
 
-    render_ai_tag_picker(
-        session_data=session,
-        model_id=model_id,
-        state_key=ai_picker_key,
-        apply_key=tags_widget_key,
-    )
     if mode == "final":
         _render_ai_summary(session)
 

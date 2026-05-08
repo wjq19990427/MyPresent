@@ -45,8 +45,7 @@ def render_ai_fill_picker(
             with ca:
                 if st.button("✅ 应用", key=f"ai_fill_apply_{state_key}", type="primary"):
                     st.session_state[f"{form_prefix}_feeling"] = result["feeling"]
-                    if result.get("reason"):
-                        st.session_state[f"{form_prefix}_reason"] = result["reason"]
+                    st.session_state[f"{form_prefix}_reason"] = result.get("reason", "")
                     st.session_state.pop(result_key, None)
                     st.rerun()
             with cb:
