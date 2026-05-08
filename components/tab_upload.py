@@ -9,6 +9,7 @@ from core.constants import TEXT_EXTS, SUPPORTED_IMPORT_EXTS, FIELD_SCHEMA
 from core.db_manager import get_tags_registry, validate_session
 from core.file_io import save_session_pending, save_session_final, import_folder_to_pending
 from components.forms import render_field_inputs
+from components.ai_fill import render_ai_fill_picker
 from components.ai_tagging import render_ai_tag_picker
 
 
@@ -241,12 +242,23 @@ def render_upload_tab() -> None:
         state_key=upload_ai_key,
         apply_key=upload_tags_key,
     )
+    render_ai_fill_picker(
+        session_data={"description": auto_description},
+        model_id=model_id,
+        state_key="upload_fill",
+        form_prefix="upload",
+    )
 
     with st.form("upload_meta_form"):
         st.markdown("### 📋 填写记录信息")
         if is_text_content:
             st.caption("💡 描述已自动使用内容填充，无需手动填写")
-        field_values = render_field_inputs("upload", skip_keys=skip)
+        pending_fill = st.session_state.pop("_ai_fill_pending_upload_fill", None)
+        field_values = render_field_inputs(
+            "upload",
+            defaults=pending_fill or {},
+            skip_keys=skip,
+        )
         if is_text_content:
             field_values["description"] = auto_description
         st.divider()
