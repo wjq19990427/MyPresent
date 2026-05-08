@@ -14,6 +14,7 @@ from core.db_manager import (
     add_tag, remove_tag, create_group, delete_group,
     load_db, validate_session,
     update_session_fields, add_comment, delete_comment,
+    soft_delete_session,
     _is_text_session,
 )
 from core.file_io import _write_md, move_to_final
@@ -370,6 +371,12 @@ def _render_detail(
             move_to_final(sid)
             st.session_state[state_key] = None
             st.rerun()
+
+    st.divider()
+    if st.button("🗑️ 移入回收站", key=f"delete_btn_{safe_sid}", type="secondary"):
+        soft_delete_session(sid)
+        st.session_state[state_key] = None
+        st.rerun()
 
     if mode == "final":
         model_id = st.session_state.get("llm_selected_model") or ""

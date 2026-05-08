@@ -40,6 +40,7 @@
 - **副作用**：
   - 表单保存 → `update_session_fields(sid, ...)`
   - 归档（仅 pending）→ `move_to_final(sid)`
+  - 删除按钮 → `soft_delete_session(sid)`，清空选中态并关闭详情面板
   - 纯文字 session 直接重写源 .txt 文件
   - AI 推荐的新标签在保存时通过 `add_tag` 自动入库
 - **依赖组件**：`forms.render_field_inputs` / `ai_tagging.render_ai_tag_picker` / `_render_ai_summary` / `_render_comments`
@@ -101,6 +102,7 @@
 
 - `_pasted_filename(text) -> str`：粘贴模式自动生成文件名（首行前 20 字符 + `.txt`）
 - `_pick_folder_dialog() -> str`：调用 Windows 文件夹选择器，取消时返回空字符串
+- `_get_uploaded_filenames() -> set[str]`：从 `data/pending|final` 递归提取已落盘文件的原始文件名，用于扫描结果去重
 - `_render_folder_import()`：选择文件夹 → 递归扫描 → multiselect → 模式选择（独立 / 合并） → 导入
 
 ### 强制约束
@@ -112,8 +114,9 @@
 ### 已知陷阱
 
 - `upload_key` 自增是 streamlit 重置 file_uploader 的标准技巧——勿删
-- 上传时「✨ AI」打标只用 `description`，`feeling` 留空（此时用户还没填）
+- 上传时完整 AI Picker 只用 `description`，`feeling` 留空（此时用户还没填）；应用结果通过 `_ai_applied_tags_upload_ai` 合并进标签默认值
 - 文件夹导入路径保存在 `folder_selected_path`；切换路径时清空 `folder_scan_results`
+- 文件夹扫描会按原始文件名排除已上传文件，并把跳过数量写入 `folder_scan_skipped_n`
 
 ---
 
