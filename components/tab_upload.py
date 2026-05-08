@@ -253,12 +253,7 @@ def render_upload_tab() -> None:
         st.markdown("### 📋 填写记录信息")
         if is_text_content:
             st.caption("💡 描述已自动使用内容填充，无需手动填写")
-        pending_fill = st.session_state.pop("_ai_fill_pending_upload_fill", None)
-        field_values = render_field_inputs(
-            "upload",
-            defaults=pending_fill or {},
-            skip_keys=skip,
-        )
+        field_values = render_field_inputs("upload", skip_keys=skip)
         if is_text_content:
             field_values["description"] = auto_description
         st.divider()

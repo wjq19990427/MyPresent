@@ -314,9 +314,7 @@ def _render_detail(
         else:
             text_body = ""
 
-        pending_fill = st.session_state.pop(f"_ai_fill_pending_{fill_state_key}", None)
-        merged = {**session, **(pending_fill or {})}
-        field_values = render_field_inputs(edit_prefix, defaults=merged, skip_keys=skip_keys)
+        field_values = render_field_inputs(edit_prefix, defaults=session, skip_keys=skip_keys)
         if is_text:
             field_values["description"] = text_body
 
@@ -430,13 +428,13 @@ def _render_detail(
         st.session_state[state_key] = None
         st.rerun()
 
+    render_ai_tag_picker(
+        session_data=session,
+        model_id=model_id,
+        state_key=ai_picker_key,
+        apply_key=tags_widget_key,
+    )
     if mode == "final":
-        render_ai_tag_picker(
-            session_data=session,
-            model_id=model_id,
-            state_key=ai_picker_key,
-            apply_key=tags_widget_key,
-        )
         _render_ai_summary(session)
 
     st.divider()
