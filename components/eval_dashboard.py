@@ -352,6 +352,15 @@ def _render_operation_logs() -> None:
             "restore": "↩️ 恢复",
             "purge": "💥 永久删除",
         }
+        op_opts = sorted({r["operation"] for r in op_logs})
+        f_ops = st.multiselect(
+            "操作类型", op_opts,
+            format_func=lambda x: op_label.get(x, x),
+            key="filter_op_types",
+        )
+        if f_ops:
+            op_logs = [r for r in op_logs if r["operation"] in f_ops]
+        st.caption(f"显示 {len(op_logs)} 条")
         for log in op_logs:
             op = op_label.get(log["operation"], log["operation"])
             st.caption(f"{log['operated_at']}　{op}　`{log['session_id'][:16]}…`")
@@ -429,10 +438,34 @@ def render_eval_dashboard() -> None:
     st.divider()
 
     # ── 最近调用日志 ──────────────────────────────────────────────────────────────
-    st.markdown("**最近调用记录**")
+    st.markdown("#### 筛选")
+    fcol1, fcol2, fcol3 = st.columns(3)
+    with fcol1:
+        skill_opts = sorted({r["skill_name"] for r in logs if r.get("skill_name")})
+        f_skills = st.multiselect("Skill", skill_opts, key="filter_skills")
+    with fcol2:
+        model_opts = sorted({models_map.get(r["model_id"], r["model_id"]) for r in logs if r.get("model_id")})
+        f_models = st.multiselect("模型", model_opts, key="filter_models")
+    with fcol3:
+        f_status = st.radio("状态", ["全部", "成功", "失败"], horizontal=True, key="filter_status")
+
+    filtered_logs = logs
+    if f_skills:
+        filtered_logs = [r for r in filtered_logs if r.get("skill_name") in f_skills]
+    if f_models:
+        filtered_logs = [
+            r for r in filtered_logs
+            if models_map.get(r.get("model_id", ""), r.get("model_id", "")) in f_models
+        ]
+    if f_status == "成功":
+        filtered_logs = [r for r in filtered_logs if r.get("success")]
+    elif f_status == "失败":
+        filtered_logs = [r for r in filtered_logs if not r.get("success")]
+
+    st.markdown(f"**最近 {len(filtered_logs)} 条（共 {len(logs)} 条）**")
     show_n = st.slider("显示条数", min_value=5, max_value=100, value=20, step=5,
                        key="eval_log_limit")
-    for r in logs[:show_n]:
+    for r in filtered_logs[:show_n]:
         status_icon = "✅" if r["success"] else "❌"
         mdl_name    = models_map.get(r.get("model_id", ""), r.get("model_id", "—") or "—")
         skill       = r.get("skill_name") or "qa"
