@@ -36,6 +36,12 @@
   - `score: float | None`：显示「🎯 相似度 XX%」徽章
 - **副作用**：渲染缩略图 + 元信息 + 切换按钮；点击按钮写 `st.session_state[state_key]` + `st.rerun()`
 
+### `_render_batch_row(session, selected_key="batch_selected_ids") -> None`
+- **入参**：
+  - `session`：完整 session dict
+  - `selected_key`：保存已选 session_id 集合的 `session_state` 键
+- **副作用**：渲染批量管理行（checkbox + 缩略图 + 摘要 + 标签）；勾选变化时写 `st.session_state[selected_key]` 并 `st.rerun()`
+
 ### `_render_detail(session, mode, state_key=None) -> None`
 - **入参**：`mode = "pending" | "final"`；`state_key` 默认按 mode 推导（搜索 Tab 显式传 `search_selected`）
 - **副作用**：
@@ -128,8 +134,9 @@
 ### `render_gallery_tab() -> None`
 - **过滤条件**：`status == "pending"` **且**至少一个文件实际存在
 - **网格**：`COLS=3` 列
-- **依赖**：`cards._render_card` / `cards._render_detail`
-- **依赖 session_state**：`pending_selected`
+- **批量模式**：`batch_mode_gallery=True` 时改用 `_render_batch_row`，支持批量软删除 / 批量归档 / 取消选择
+- **依赖**：`cards._render_card` / `cards._render_batch_row` / `cards._render_detail`
+- **依赖 session_state**：`pending_selected` / `batch_mode_gallery` / `batch_selected_ids`
 
 ### 已知陷阱
 
@@ -146,6 +153,7 @@
   - 过滤态：`archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`
   - 选中态：`archived_selected`
 - **依赖**：`cards._render_card` / `_render_detail` / `_render_tag_manager` / `_render_group_manager`
+- **批量模式**：`batch_mode_archived=True` 时改用 `_render_batch_row`，支持批量软删除 / 批量加标签 / 取消选择
 
 ### 过滤优先级（AND 链）
 
@@ -226,6 +234,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
   - Tab 加载时调用 `purge_expired_deleted(30)` 自动清理超期软删除记录
   - 点击恢复 → `restore_session(sid)` + `st.rerun()`
   - 点击永久删除 → 二次确认后删除磁盘文件、删除 `sessions` 行、写 `purge` 操作日志
+  - 每条记录提供「查看内容」折叠块，展示描述 / 感受 / 原因 / 标签 / 文件名
 - **依赖**：`get_deleted_sessions` / `restore_session` / `purge_expired_deleted` / `log_operation`
 - **保留期**：`_KEEP_DAYS = 30`
 

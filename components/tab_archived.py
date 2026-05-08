@@ -4,9 +4,15 @@ from __future__ import annotations
 import streamlit as st
 
 from core.constants import COLS
-from core.db_manager import get_groups, get_tags_registry, load_db
+from core.db_manager import (
+    get_groups, get_session, get_tags_registry, load_db,
+    soft_delete_session, update_session_tags,
+)
 from core.file_io import _session_file_type
-from components.cards import _render_card, _render_detail, _render_tag_manager, _render_group_manager
+from components.cards import (
+    _render_batch_row, _render_card, _render_detail,
+    _render_group_manager, _render_tag_manager,
+)
 
 
 def render_archived_tab() -> None:
@@ -20,6 +26,17 @@ def render_archived_tab() -> None:
     if not all_finals:
         st.info("暂无已归档记录。在「灵感墙」补全后归档，或在「记录舱」直接完成归档。")
         return
+
+    col_title, col_batch = st.columns([6, 1])
+    with col_batch:
+        batch_mode = st.session_state.get("batch_mode_archived", False)
+        if st.button(
+            "🔲 批量管理" if not batch_mode else "✅ 退出批量",
+            key="toggle_batch_archived",
+        ):
+            st.session_state["batch_mode_archived"] = not batch_mode
+            st.session_state["batch_selected_ids"] = set()
+            st.rerun()
 
     no_tag_count = sum(1 for s in all_finals if not s.get("tags"))
     if no_tag_count:
@@ -112,10 +129,40 @@ def render_archived_tab() -> None:
         st.info("当前筛选条件下没有记录。")
         return
 
-    for row_start in range(0, len(db), COLS):
-        cols = st.columns(COLS)
-        for col, session in zip(cols, db[row_start: row_start + COLS]):
-            _render_card(col, session, "archived_selected")
+    if batch_mode:
+        selected: set = st.session_state.get("batch_selected_ids", set())
+        st.markdown(f"已选 **{len(selected)}** 条")
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            if st.button("🗑️ 批量移入回收站", disabled=not selected):
+                for sid in list(selected):
+                    soft_delete_session(sid)
+                st.session_state["batch_selected_ids"] = set()
+                st.rerun()
+        with col_b:
+            new_tags = st.multiselect("选择要添加的标签", get_tags_registry(), key="batch_add_tags")
+            if st.button("🏷️ 添加标签", disabled=not selected or not new_tags):
+                for sid in list(selected):
+                    s = get_session(sid)
+                    if s:
+                        merged = list(dict.fromkeys(s.get("tags", []) + new_tags))
+                        update_session_tags(sid, merged)
+                st.session_state["batch_selected_ids"] = set()
+                st.rerun()
+        with col_c:
+            if st.button("↩️ 全部取消选择", disabled=not selected):
+                st.session_state["batch_selected_ids"] = set()
+                st.rerun()
+        st.divider()
+        for session in db:
+            _render_batch_row(session)
+        st.divider()
+        return
+    else:
+        for row_start in range(0, len(db), COLS):
+            cols = st.columns(COLS)
+            for col, session in zip(cols, db[row_start: row_start + COLS]):
+                _render_card(col, session, "archived_selected")
 
     if not sel:
         return
