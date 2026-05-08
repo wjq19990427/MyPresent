@@ -53,13 +53,14 @@
   - AI 推荐的新标签在保存时通过 `add_tag` 自动入库
 - **依赖组件**：`forms.render_field_inputs` / `ai_fill.render_ai_fill_picker` / `ai_tagging.render_ai_tag_picker` / `_render_ai_summary` / `_render_comments`
 - **已知陷阱**：widget key 用 `safe_sid = "".join(c if c.isalnum() else "_" for c in sid)` 净化，避免 streamlit 对特殊字符报错
-- **AI 补全 / AI 标签**：都在编辑 form 之前渲染；补全应用后直接写入 `{form_prefix}_feeling` / `{form_prefix}_reason`，标签应用后清除标签 multiselect state 并用 `_ai_applied_tags_*` 合并默认值
+- **AI 功能位置**：AI 补全在字段编辑区上方；AI 摘要在字段区下方，pending/final 均可用；AI 标签在标签 multiselect 上方
+- **保存控件**：详情页使用普通 `st.button` 即时按钮，不再用 `st.form`，避免 AI 组件写入 widget state 后前端不刷新
 
 ### `_render_comments(session) -> None`
 - **必须**在 `st.form` 外调用（依赖 `st.button` 即时回写）
 
 ### `_render_ai_summary(session) -> None`
-- 仅 final 详情页用；缓存 key = `_story_{session_id}`，依赖全局 `llm_selected_model`
+- pending/final 详情页均可用；缓存 key = `_story_{session_id}`，依赖全局 `llm_selected_model`
 
 ### `_render_tag_manager() -> None` / `_render_group_manager() -> None`
 - 标签：禁删 `DEFAULT_TAGS`
@@ -267,7 +268,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **副作用**：
   - 调 `auto_tag_session` → 写 `_ai_tag_result_{state_key}`
   - 用户勾选 → 写 `_ai_tag_checked_{state_key}`
-  - 应用按钮 → 调 `add_tag()` 把 `updated` 中不在 registry 的标签写入 `tags_registry`，再写 `_ai_applied_tags_{state_key}` + `del st.session_state[apply_key]`
+  - 应用按钮 → 调 `add_tag()` 把 `updated` 中不在 registry 的标签写入 `tags_registry`，写 `_ai_applied_tags_{state_key}`，并把选中标签合并写入 `st.session_state[apply_key]`
 
 ### session_state 键空间约定
 
@@ -279,7 +280,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 
 ### 已知陷阱
 
-- 与 `cards._render_detail` 是**紧耦合**：`apply_key` 必须等于详情表单内 multiselect 的 widget key，否则应用无效
+- 与 `cards._render_detail` 是**紧耦合**：`apply_key` 必须等于目标标签 multiselect 的 widget key，否则前端无法自动勾选
 - 应用按钮按下时即调 `add_tag` 入库；`cards._render_detail` 的入库循环作为 belt-and-suspenders 兼职捕获 session 历史孤儿标签
 
 ## ai_fill.py

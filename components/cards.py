@@ -170,14 +170,14 @@ def _render_comments(session: dict) -> None:
 # ─── AI 摘要 ──────────────────────────────────────────────────────────────────────
 
 def _render_ai_summary(session: dict) -> None:
-    """AI 摘要面板（仅 final 记录展示）。"""
+    """AI 摘要面板。"""
     model_id = st.session_state.get("llm_selected_model") or ""
     cache_key = f"_story_{session['session_id']}"
 
     cached = st.session_state.get(cache_key)
     with st.expander("✨ AI 摘要", expanded=bool(cached)):
         if not model_id:
-            st.caption("请先在「搜索」Tab 选择模型，即可生成此记忆的文学化摘要。")
+            st.caption("请先在「运行看板」选择模型，即可生成此记忆的文学化摘要。")
             return
         if cached:
             st.markdown(cached)
@@ -290,14 +290,36 @@ def _render_detail(
         **session,
         "description": current_text_body if is_text else session.get("description", ""),
     }
+    st.markdown("#### ✏️ 编辑字段")
     render_ai_fill_picker(
         session_data=fill_session,
         model_id=model_id,
         state_key=fill_state_key,
         form_prefix=edit_prefix,
     )
+
+    if is_text:
+        st.markdown("**📝 文本内容**（可直接编辑，保存后同步写入文件）")
+        text_body = st.text_area(
+            "文本内容",
+            value=current_text_body,
+            height=300,
+            key=f"text_body_{safe_sid}",
+            label_visibility="collapsed",
+        )
+    else:
+        text_body = ""
+
+    field_values = render_field_inputs(edit_prefix, defaults=session, skip_keys=skip_keys)
+    if is_text:
+        field_values["description"] = text_body
+
+    _render_ai_summary({**session, **field_values})
+
+    st.divider()
+    st.markdown("**🏷️ 标签**（可多选，不计入编辑历史）")
     render_ai_tag_picker(
-        session_data=fill_session,
+        session_data={**session, **field_values},
         model_id=model_id,
         state_key=ai_picker_key,
         apply_key=tags_widget_key,
@@ -305,85 +327,63 @@ def _render_detail(
 
     # AI 标签组件应用过来的标签（点击「应用到标签栏」后写入）
     ai_applied_tags  = st.session_state.get(f"_ai_applied_tags_{ai_picker_key}", [])
+    all_tags     = get_tags_registry()
+    ai_new_tags  = [t for t in ai_applied_tags if t not in all_tags]
+    extra_tags   = [t for t in session.get("tags", []) if t not in all_tags]
+    tag_options  = all_tags + extra_tags + ai_new_tags
+    merged_default = list(dict.fromkeys(
+        [t for t in session.get("tags", []) if t in tag_options] +
+        [t for t in ai_applied_tags if t in tag_options]
+    ))
+    selected_tags = st.multiselect(
+        "标签",
+        options=tag_options,
+        default=merged_default,
+        key=tags_widget_key,
+        label_visibility="collapsed",
+    )
+    if ai_applied_tags:
+        st.caption("💡 已含 AI 推荐标签，保存时新标签将自动注册到标签库。")
 
-    with st.form(f"form_{safe_sid}"):
-        st.markdown("#### ✏️ 编辑字段")
-
-        if is_text:
-            st.markdown("**📝 文本内容**（可直接编辑，保存后同步写入文件）")
-            text_body = st.text_area(
-                "文本内容",
-                value=current_text_body,
-                height=300,
-                key=f"text_body_{safe_sid}",
-                label_visibility="collapsed",
-            )
-        else:
-            text_body = ""
-
-        field_values = render_field_inputs(edit_prefix, defaults=session, skip_keys=skip_keys)
-        if is_text:
-            field_values["description"] = text_body
-
-        st.divider()
-        st.markdown("**🏷️ 标签**（可多选，不计入编辑历史）")
-        all_tags     = get_tags_registry()
-        # AI 新生成的标签（不在注册表中）也作为可选项临时加入
-        ai_new_tags  = [t for t in ai_applied_tags if t not in all_tags]
-        extra_tags   = [t for t in session.get("tags", []) if t not in all_tags]
-        tag_options  = all_tags + extra_tags + ai_new_tags
-        # 合并现有标签 + AI 应用标签作为默认勾选
-        merged_default = list(dict.fromkeys(
-            [t for t in session.get("tags", []) if t in tag_options] +
-            [t for t in ai_applied_tags if t in tag_options]
-        ))
-        selected_tags = st.multiselect(
-            "标签",
-            options=tag_options,
-            default=merged_default,
-            key=tags_widget_key,
+    groups = get_groups()
+    if groups:
+        st.markdown("**📁 所属分组**")
+        group_map    = {g["id"]: g["name"] for g in groups}
+        current_gids = [gid for gid in session.get("group_ids", []) if gid in group_map]
+        selected_gids = st.multiselect(
+            "分组",
+            options=list(group_map.keys()),
+            default=current_gids,
+            format_func=lambda gid: group_map.get(gid, gid),
+            key=f"groups_{safe_sid}",
             label_visibility="collapsed",
         )
-        if ai_applied_tags:
-            st.caption("💡 已含 AI 推荐标签，保存时新标签将自动注册到标签库。")
+    else:
+        selected_gids = session.get("group_ids", [])
 
-        groups = get_groups()
-        if groups:
-            st.markdown("**📁 所属分组**")
-            group_map    = {g["id"]: g["name"] for g in groups}
-            current_gids = [gid for gid in session.get("group_ids", []) if gid in group_map]
-            selected_gids = st.multiselect(
-                "分组",
-                options=list(group_map.keys()),
-                default=current_gids,
-                format_func=lambda gid: group_map.get(gid, gid),
-                key=f"groups_{safe_sid}",
-                label_visibility="collapsed",
+    st.divider()
+
+    if mode == "pending":
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            do_save = st.button("💾 保存更改", key=f"save_{safe_sid}", use_container_width=True)
+        with c2:
+            do_archive = st.button(
+                "✅ 完成并归档", key=f"archive_{safe_sid}", type="primary",
+                use_container_width=True,
             )
-        else:
-            selected_gids = session.get("group_ids", [])
-
-        st.divider()
-
-        if mode == "pending":
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                do_save    = st.form_submit_button("💾 保存更改", use_container_width=True)
-            with c2:
-                do_archive = st.form_submit_button(
-                    "✅ 完成并归档", type="primary", use_container_width=True
-                )
-            with c3:
-                do_cancel  = st.form_submit_button("取消", use_container_width=True)
-        else:
-            c1, c2 = st.columns([3, 1])
-            with c1:
-                do_save   = st.form_submit_button(
-                    "💾 保存更改", type="primary", use_container_width=True
-                )
-            with c2:
-                do_cancel = st.form_submit_button("取消", use_container_width=True)
-            do_archive = False
+        with c3:
+            do_cancel = st.button("取消", key=f"cancel_{safe_sid}", use_container_width=True)
+    else:
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            do_save = st.button(
+                "💾 保存更改", key=f"save_{safe_sid}", type="primary",
+                use_container_width=True,
+            )
+        with c2:
+            do_cancel = st.button("取消", key=f"cancel_{safe_sid}", use_container_width=True)
+        do_archive = False
 
     if do_cancel:
         st.session_state[state_key] = None
@@ -434,9 +434,6 @@ def _render_detail(
         soft_delete_session(sid)
         st.session_state[state_key] = None
         st.rerun()
-
-    if mode == "final":
-        _render_ai_summary(session)
 
     st.divider()
     _render_comments(session)
