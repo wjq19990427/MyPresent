@@ -87,6 +87,42 @@ def _render_card(
             st.rerun()
 
 
+def _render_batch_row(session: dict, selected_key: str = "batch_selected_ids") -> None:
+    sid      = session["session_id"]
+    safe_sid = "".join(c if c.isalnum() else "_" for c in sid)
+    selected: set = st.session_state.get(selected_key, set())
+
+    cols = st.columns([0.5, 1, 5, 3])
+    with cols[0]:
+        checked = st.checkbox(
+            "",
+            value=sid in selected,
+            key=f"bchk_{safe_sid}",
+            label_visibility="collapsed",
+        )
+        if checked and sid not in selected:
+            selected.add(sid)
+            st.session_state[selected_key] = selected
+            st.rerun()
+        elif not checked and sid in selected:
+            selected.discard(sid)
+            st.session_state[selected_key] = selected
+            st.rerun()
+    with cols[1]:
+        thumb = _session_thumb(session)
+        if isinstance(thumb, str) and Path(thumb).exists():
+            st.image(thumb, width=60)
+        elif isinstance(thumb, bytes):
+            st.image(thumb, width=60)
+    with cols[2]:
+        desc = (session.get("description") or "（无描述）")[:80]
+        st.markdown(f"**{desc}**")
+        st.caption(session.get("upload_time", ""))
+    with cols[3]:
+        tags = session.get("tags", [])
+        st.caption(" · ".join(tags[:5]) if tags else "无标签")
+
+
 # ─── 评论区 ──────────────────────────────────────────────────────────────────────
 
 def _render_comments(session: dict) -> None:

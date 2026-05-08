@@ -77,6 +77,18 @@ def render_recycle_tab() -> None:
                     st.session_state[f"_confirm_perm_del_{safe_sid}"] = True
                     st.rerun()
 
+            with st.expander("📄 查看内容"):
+                st.markdown(f"**描述**：{s.get('description') or '（无）'}")
+                st.markdown(f"**感受**：{s.get('feeling') or '（无）'}")
+                st.markdown(f"**记录原因**：{s.get('reason') or '（无）'}")
+                tags = s.get("tags", [])
+                st.markdown(f"**标签**：{' · '.join(tags) if tags else '（无标签）'}")
+                files = s.get("files", [])
+                if files:
+                    st.markdown(
+                        "**文件**：" + " / ".join(f.get("original_name", "") for f in files)
+                    )
+
         if st.session_state.get(f"_confirm_perm_del_{safe_sid}"):
             with st.container(border=True):
                 st.warning("⚠️ 永久删除后**无法恢复**，确认吗？")
