@@ -32,9 +32,16 @@
 ### 初始化
 
 #### `init_db() -> None`
-- **用途**：创建库 + 全部表（如不存在）+ 灌入 `DEFAULT_TAGS`
+- **用途**：创建库 + 全部表（如不存在）+ 灌入 `DEFAULT_TAGS` / `label_registry` 系统种子
 - **副作用**：写 `data/database.db`；幂等
 - **调用时机**：`app.py` 启动 / `migrate.py`
+- **迁移行为**：幂等补齐 `sessions.domains/attributes/topics/emotion_tags/emotion_note` 五列，并自动调用 `migrate_tags_to_topics()`
+
+#### `migrate_tags_to_topics() -> int`
+- **用途**：一次性把旧 `session_tags` 平移到 `sessions.topics`
+- **行为**：仅处理 `topics IS NULL` / 空字符串 / `'[]'` 的 session；将旧标签按名称排序后 JSON 序列化写入 `topics`；当 `domains` 为空或 `'[]'` 时写入 `["未分类"]`
+- **副作用**：批量更新 `sessions`；不删除 `session_tags` / `tags_registry`
+- **返回**：实际更新的 session 行数；重复调用幂等
 
 ### Session CRUD
 
@@ -477,6 +484,17 @@
 
 - `DEFAULT_TAGS = ["个人规划", "生活感悟", "重要记忆", "工作总结", "随笔"]`
 - `init_db()` 启动时灌入 `tags_registry`
+
+### L-A-T / 情绪标签种子
+
+| 常量 | 内容 |
+|------|------|
+| `DOMAINS` | `["个人成长", "情绪感受", "工作经验", "人际关系", "兴趣爱好", "财务理财"]` |
+| `ATTRIBUTES` | `["反思避坑", "灵光一现", "阶段里程碑", "干货总结", "疑问困惑", "日常流水"]` |
+| `EMOTIONS` | `["喜悦", "平静", "充实", "期待", "疲惫", "焦虑", "愤怒", "失落", "迷茫"]` |
+| `TOPICS` | `[]`（无默认值，纯动态） |
+
+`init_db()` 启动时将四组常量灌入 `label_registry`，类型分别为 `domain/attribute/topic/emotion`，系统种子 `is_system=1`。
 
 ### `FIELD_SCHEMA` — 字段扩展接口
 
