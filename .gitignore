@@ -22,3 +22,6 @@ venv/
 *.swp
 .DS_Store
 Thumbs.db
+
+# SOP 模板（独立仓库 AI-Co-Pilot-Starter）
+template/
