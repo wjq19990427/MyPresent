@@ -11,17 +11,31 @@ from core.constants import (
 )
 from core.db_manager import (
     get_tags_registry, get_groups,
-    add_tag, remove_tag, create_group, delete_group,
-    load_db, validate_session,
+    add_label, add_tag, remove_tag, create_group, delete_group,
+    get_label_registry,
+    validate_session,
     update_session_fields, add_comment, delete_comment,
     soft_delete_session,
     _is_text_session,
 )
-from core.file_io import _write_md, move_to_final
+from core.file_io import move_to_final
 from core.media import video_thumbnail, pil_to_png_bytes
 from components.forms import render_field_inputs
-from components.ai_fill import render_ai_fill_picker
-from components.ai_tagging import render_ai_tag_picker
+from components.ai_analysis import render_session_ai_analysis
+
+
+_STRUCTURED_LABEL_TYPES = {
+    "domains": "domain",
+    "attributes": "attribute",
+    "topics": "topic",
+    "emotion_tags": "emotion",
+}
+_STRUCTURED_LABELS = {
+    "domains": "领域",
+    "attributes": "视角",
+    "topics": "话题",
+    "emotion_tags": "情绪",
+}
 
 
 # ─── 缩略图 ─────────────────────────────────────────────────────────────────────
@@ -272,7 +286,6 @@ def _render_detail(
     safe_sid         = "".join(c if c.isalnum() else "_" for c in sid)
     edit_prefix      = f"edit_{safe_sid}"
     skip_keys        = {"description"} if is_text else set()
-    ai_picker_key    = f"ai_tags_{sid}"
     tags_widget_key  = f"tags_{safe_sid}"
 
     text_file_path    = None
@@ -285,18 +298,19 @@ def _render_detail(
             current_text_body = str(session.get("description", ""))
 
     model_id = st.session_state.get("llm_selected_model") or ""
-    fill_state_key = f"fill_{safe_sid}"
-    fill_session = {
+    analysis_session = {
         **session,
         "description": current_text_body if is_text else session.get("description", ""),
     }
-    st.markdown("#### ✏️ 编辑字段")
-    render_ai_fill_picker(
-        session_data=fill_session,
+    analysis_result = render_session_ai_analysis(
+        analysis_session,
         model_id=model_id,
-        state_key=fill_state_key,
-        form_prefix=edit_prefix,
+        state_key=f"detail_{safe_sid}",
     )
+    if analysis_result:
+        _apply_analysis_to_detail_form(analysis_result, edit_prefix, safe_sid)
+
+    st.markdown("#### ✏️ 编辑字段")
 
     if is_text:
         st.markdown("**📝 文本内容**（可直接编辑，保存后同步写入文件）")
@@ -318,22 +332,11 @@ def _render_detail(
 
     st.divider()
     st.markdown("**🏷️ 标签**（可多选，不计入编辑历史）")
-    render_ai_tag_picker(
-        session_data={**session, **field_values},
-        model_id=model_id,
-        state_key=ai_picker_key,
-        apply_key=tags_widget_key,
-    )
-
-    # AI 标签组件应用过来的标签（点击「应用到标签栏」后写入）
-    ai_applied_tags  = st.session_state.get(f"_ai_applied_tags_{ai_picker_key}", [])
     all_tags     = get_tags_registry()
-    ai_new_tags  = [t for t in ai_applied_tags if t not in all_tags]
     extra_tags   = [t for t in session.get("tags", []) if t not in all_tags]
-    tag_options  = all_tags + extra_tags + ai_new_tags
+    tag_options  = all_tags + extra_tags
     merged_default = list(dict.fromkeys(
-        [t for t in session.get("tags", []) if t in tag_options] +
-        [t for t in ai_applied_tags if t in tag_options]
+        [t for t in session.get("tags", []) if t in tag_options]
     ))
     selected_tags = st.multiselect(
         "标签",
@@ -342,8 +345,8 @@ def _render_detail(
         key=tags_widget_key,
         label_visibility="collapsed",
     )
-    if ai_applied_tags:
-        st.caption("💡 已含 AI 推荐标签，保存时新标签将自动注册到标签库。")
+
+    structured_values = _render_structured_detail_fields(session, safe_sid)
 
     groups = get_groups()
     if groups:
@@ -402,6 +405,7 @@ def _render_detail(
                 add_tag(t)
         field_values["tags"]      = selected_tags
         field_values["group_ids"] = selected_gids
+        field_values.update(structured_values)
         update_session_fields(sid, field_values)
         st.session_state[state_key] = sid
         st.rerun()
@@ -424,6 +428,7 @@ def _render_detail(
                     add_tag(t)
             field_values["tags"]      = selected_tags
             field_values["group_ids"] = selected_gids
+            field_values.update(structured_values)
             update_session_fields(sid, field_values)
             move_to_final(sid)
             st.session_state[state_key] = None
@@ -437,6 +442,94 @@ def _render_detail(
 
     st.divider()
     _render_comments(session)
+
+
+def _apply_analysis_to_detail_form(
+    result: dict, edit_prefix: str, safe_sid: str
+) -> None:
+    for key in ("title", "feeling", "reason"):
+        if key in result:
+            st.session_state[f"{edit_prefix}_{key}"] = result.get(key, "")
+    if "summary" in result:
+        st.session_state[f"{safe_sid}_summary"] = str(result.get("summary") or "")
+
+    for key in ("domains", "attributes", "topics", "emotion_tags"):
+        values = _clean_list(result.get(key, []))
+        if key == "topics":
+            values = list(
+                dict.fromkeys([*values, *_clean_list(result.get("new_topics", []))])
+            )
+        st.session_state[f"{safe_sid}_{key}"] = values
+        _register_structured_labels(key, values)
+
+    if "emotion_note" in result:
+        st.session_state[f"{safe_sid}_emotion_note"] = str(
+            result.get("emotion_note") or ""
+        )
+    st.rerun()
+
+
+def _render_structured_detail_fields(session: dict, safe_sid: str) -> dict:
+    st.markdown("### 🧩 结构化标签")
+    st.caption("AI 分析会填入这些字段，也可手动调整。")
+    values = {}
+    for field, label in _STRUCTURED_LABELS.items():
+        state_key = f"{safe_sid}_{field}"
+        st.session_state.setdefault(state_key, _clean_list(session.get(field, [])))
+        options = _structured_options(field, session)
+        values[field] = st.multiselect(
+            label,
+            options=options,
+            key=state_key,
+        )
+    st.session_state.setdefault(f"{safe_sid}_summary", str(session.get("summary", "")))
+    st.session_state.setdefault(
+        f"{safe_sid}_emotion_note", str(session.get("emotion_note", ""))
+    )
+    values["summary"] = st.text_area(
+        "摘要",
+        key=f"{safe_sid}_summary",
+        height=90,
+    )
+    values["emotion_note"] = st.text_area(
+        "情绪描述",
+        key=f"{safe_sid}_emotion_note",
+        height=90,
+    )
+    return values
+
+
+def _structured_options(field: str, session: dict) -> list[str]:
+    label_type = _STRUCTURED_LABEL_TYPES[field]
+    registry = [item["name"] for item in get_label_registry(label_type)]
+    current = _clean_list(session.get(field, []))
+    state_values = _clean_list(
+        st.session_state.get(f"{session_state_safe_id(session)}_{field}", [])
+    )
+    return list(dict.fromkeys([*registry, *current, *state_values]))
+
+
+def session_state_safe_id(session: dict) -> str:
+    sid = str(session.get("session_id", ""))
+    return "".join(c if c.isalnum() else "_" for c in sid)
+
+
+def _clean_list(value) -> list[str]:
+    if isinstance(value, list):
+        items = value
+    elif value in (None, ""):
+        items = []
+    else:
+        items = [value]
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
+def _register_structured_labels(field: str, values: list[str]) -> None:
+    label_type = _STRUCTURED_LABEL_TYPES.get(field)
+    if not label_type:
+        return
+    for value in values:
+        add_label(value, label_type)
 
 
 # ─── 标签 / 分组 管理面板 ────────────────────────────────────────────────────────

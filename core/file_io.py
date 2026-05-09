@@ -109,10 +109,28 @@ def save_session_pending(
     source_type: str,
     field_values: dict,
     tags: list[str] | None = None,
+    domains: list[str] | None = None,
+    attributes: list[str] | None = None,
+    topics: list[str] | None = None,
+    emotion_tags: list[str] | None = None,
+    emotion_note: str = "",
+    summary: str = "",
 ) -> None:
     sid          = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     file_entries = _write_files(file_data_list, PENDING_DIR, sid)
-    create_session(sid, file_entries, source_type, field_values, tags=tags)
+    create_session(
+        sid,
+        file_entries,
+        source_type,
+        field_values,
+        tags=tags,
+        domains=domains,
+        attributes=attributes,
+        topics=topics,
+        emotion_tags=emotion_tags,
+        emotion_note=emotion_note,
+        summary=summary,
+    )
 
 
 def save_session_final(
@@ -120,6 +138,12 @@ def save_session_final(
     source_type: str,
     field_values: dict,
     tags: list[str] | None = None,
+    domains: list[str] | None = None,
+    attributes: list[str] | None = None,
+    topics: list[str] | None = None,
+    emotion_tags: list[str] | None = None,
+    emotion_note: str = "",
+    summary: str = "",
 ) -> None:
     from .vector_db import embed_session
     sid          = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
@@ -128,6 +152,12 @@ def save_session_final(
     session      = create_session(
         sid, file_entries, source_type, field_values,
         tags=tags, status="final", archive_time=now,
+        domains=domains,
+        attributes=attributes,
+        topics=topics,
+        emotion_tags=emotion_tags,
+        emotion_note=emotion_note,
+        summary=summary,
     )
     _write_md(session)
     embed_session(session)
