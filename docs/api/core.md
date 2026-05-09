@@ -178,6 +178,11 @@
 #### `get_calendar_todo(todo_id: str) -> dict | None`
 - **返回**：单条待办，未找到返回 `None`
 
+#### `get_todos_by_goal(goal_id: str) -> list[dict]`
+- **返回**：所有 `linked_goal_id == goal_id` 的待办，全字段 dict（含 `postpone_count` / `postponed_days`），按 `target_date ASC` 排序
+- **约束**：不过滤状态，已完成与未完成均返回
+- **副作用**：无
+
 #### `complete_todo(todo_id: str, reflection: str = "") -> None`
 - **副作用**：将待办状态改为 `已完成`，并写入复盘心得
 - **不变量**：不修改延期字段

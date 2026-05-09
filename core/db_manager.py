@@ -909,6 +909,16 @@ def get_calendar_todo(todo_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def get_todos_by_goal(goal_id: str) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM calendar_todos WHERE linked_goal_id=? "
+            "ORDER BY target_date ASC",
+            (goal_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def complete_todo(todo_id: str, reflection: str = "") -> None:
     with _conn() as conn:
         conn.execute(
