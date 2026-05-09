@@ -149,6 +149,14 @@
 - **副作用**：调 `core.llm_client.call_llm(expect_json=True)`，自动写 `llm_logs`；只读 `sessions` 和 `label_registry`，不写 DB
 - **失败路径**（不抛异常，转 `SkillResult(success=False, error=...)`）：缺 `model_id` / 缺 `session_id` / 记录不存在 / 内容为空 / 非法 `fields` / LLM 调用或 JSON 解析失败
 
+#### `execute_draft(self, draft: dict, model_id: str, *, fields="all", hint="") -> SkillResult`
+
+- **用途**：上传流程保存前的草稿分析；不需要 `session_id`
+- **入参**：`draft` 为当前上传表单字段值，至少要求 `description` 非空；`fields` / `hint` 与 `execute()` 一致
+- **返回**：同 `execute()`，`SkillResult.data` 仅包含请求字段；请求 `topics` 时额外含 `new_topics`
+- **副作用**：调 `core.llm_client.call_llm(expect_json=True)`，自动写 `llm_logs`；读 `label_registry`；不读写 `sessions`
+- **失败路径**：缺 `model_id` / `draft["description"]` 为空 / 非法 `fields` / LLM 调用或 JSON 解析失败
+
 #### `run(self, session: dict, model_id: str = "", **kwargs) -> SkillResult`
 
 - **用途**：兼容 `BaseSkill.run()`；从 `session["session_id"]` 或 `session["id"]` 取 ID 后委托 `execute()`

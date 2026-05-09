@@ -89,6 +89,46 @@ class AnalysisSkill(BaseSkill):
 
         return SkillResult(success=True, data=_sanitize_result(result, requested))
 
+    def execute_draft(
+        self,
+        draft: dict,
+        model_id: str,
+        *,
+        fields: str | list[str] = "all",
+        hint: str = "",
+    ) -> SkillResult:
+        if not model_id:
+            return SkillResult(success=False, error="未指定 model_id")
+        if not str(draft.get("description", "")).strip():
+            return SkillResult(success=False, error="描述为空，无法分析")
+
+        requested, error = _normalize_fields(fields)
+        if error:
+            return SkillResult(success=False, error=error)
+
+        content = _build_content(draft)
+        if not content:
+            return SkillResult(success=False, error="记录内容为空，无法分析")
+
+        user_prompt = _build_user_prompt(content, requested, hint)
+        try:
+            result = call_llm(
+                ANALYSIS_SYSTEM,
+                user_prompt,
+                model_id=model_id,
+                expect_json=True,
+                skill_name=self.name,
+            )
+        except LLMJsonParseError as exc:
+            return SkillResult(success=False, error=f"JSON 解析失败：{exc}")
+        except Exception as exc:
+            return SkillResult(success=False, error=str(exc))
+
+        if not isinstance(result, dict):
+            return SkillResult(success=False, error="返回格式错误")
+
+        return SkillResult(success=True, data=_sanitize_result(result, requested))
+
     def run(self, session: dict, model_id: str = "", **kwargs) -> SkillResult:
         session_id = str(session.get("session_id") or session.get("id") or "").strip()
         if not session_id:
