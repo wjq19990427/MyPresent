@@ -1,17 +1,16 @@
-"""上传草稿的统一 AI 分析面板。"""
+"""统一 AI 分析面板。"""
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 import streamlit as st
 
 from skills.analysis_skill import AnalysisSkill
 
 
-_RESULT_KEY = "_analysis_result"
-_FIELD_STATES_KEY = "_analysis_field_states"
-_APPLY_KEY = "_analysis_apply_payload"
-_DRAFT_SIGNATURE_KEY = "_analysis_draft_signature"
+_SESSION_SOURCE = "session"
+_DRAFT_SOURCE = "draft"
 
 _FIELD_LABELS = {
     "title": "标题",
@@ -47,45 +46,83 @@ _HINTS = {
 }
 
 
-def render_ai_analysis(draft: dict, model_id: str) -> dict | None:
+def render_ai_analysis(
+    draft: dict,
+    model_id: str,
+    *,
+    state_key: str = "upload",
+) -> dict | None:
     """渲染上传草稿 AI 分析面板，确认后返回选中的字段值。"""
-    _reset_if_draft_changed(draft)
-    applied = st.session_state.pop(_APPLY_KEY, None)
+    return _render_analysis_panel(
+        source_type=_DRAFT_SOURCE,
+        source=draft,
+        model_id=model_id,
+        state_key=state_key,
+    )
 
-    with st.expander("✨ AI 分析", expanded=_RESULT_KEY in st.session_state):
+
+def render_session_ai_analysis(
+    session: dict,
+    model_id: str,
+    *,
+    state_key: str,
+) -> dict | None:
+    """渲染已存在记录的 AI 分析面板，确认后返回选中的字段值。"""
+    return _render_analysis_panel(
+        source_type=_SESSION_SOURCE,
+        source=session,
+        model_id=model_id,
+        state_key=state_key,
+    )
+
+
+def _render_analysis_panel(
+    *,
+    source_type: str,
+    source: dict,
+    model_id: str,
+    state_key: str,
+) -> dict | None:
+    keys = _keys(state_key)
+    _reset_if_source_changed(source, keys)
+    applied = st.session_state.pop(keys["apply"], None)
+
+    with st.expander("✨ AI 分析", expanded=keys["result"] in st.session_state):
         if not model_id:
-            st.warning("请先在「运行看板」中配置并选择一个 LLM 模型。")
+            st.warning("请先在「系统」中配置并选择一个 LLM 模型。")
             return applied
 
-        if st.button("✨ AI 分析", key="analysis_run_all", type="primary"):
-            _run_analysis(draft, model_id, "all")
+        if st.button("✨ AI 分析", key=f"analysis_run_all_{state_key}", type="primary"):
+            _run_analysis(source_type, source, model_id, "all", state_key=state_key)
 
-        result = st.session_state.get(_RESULT_KEY)
+        result = st.session_state.get(keys["result"])
         if not result:
             st.caption("AI 会一次生成标题、摘要、结构化标签、感受与记录原因。")
             return applied
 
         st.session_state.setdefault(
-            _FIELD_STATES_KEY, {field: True for field in result if field != "new_topics"}
+            keys["fields"], {field: True for field in result if field != "new_topics"}
         )
 
         for field in _FIELD_ORDER:
             if field not in result:
                 continue
-            _render_field_row(field, result, draft, model_id)
+            _render_field_row(
+                field, result, source_type, source, model_id, state_key, keys
+            )
         if result.get("new_topics"):
             st.caption(f"建议新增话题：{_format_value(result['new_topics'])}")
 
         st.divider()
         col_all, col_selected = st.columns(2)
         with col_all:
-            if st.button("全部采纳", key="analysis_apply_all", type="primary"):
-                st.session_state[_APPLY_KEY] = dict(result)
+            if st.button("全部采纳", key=f"analysis_apply_all_{state_key}", type="primary"):
+                st.session_state[keys["apply"]] = dict(result)
                 st.rerun()
         with col_selected:
-            if st.button("采纳勾选项", key="analysis_apply_checked"):
-                states = st.session_state.get(_FIELD_STATES_KEY, {})
-                st.session_state[_APPLY_KEY] = {
+            if st.button("采纳勾选项", key=f"analysis_apply_checked_{state_key}"):
+                states = st.session_state.get(keys["fields"], {})
+                st.session_state[keys["apply"]] = {
                     key: value
                     for key, value in result.items()
                     if key == "new_topics" or states.get(key, False)
@@ -95,18 +132,36 @@ def render_ai_analysis(draft: dict, model_id: str) -> dict | None:
     return applied
 
 
-def _reset_if_draft_changed(draft: dict) -> None:
-    signature = json.dumps(draft, ensure_ascii=False, sort_keys=True, default=str)
-    if st.session_state.get(_DRAFT_SIGNATURE_KEY) == signature:
+def _keys(state_key: str) -> dict[str, str]:
+    safe = "".join(c if c.isalnum() else "_" for c in state_key)
+    return {
+        "result": f"_analysis_result_{safe}",
+        "fields": f"_analysis_field_states_{safe}",
+        "apply": f"_analysis_apply_payload_{safe}",
+        "signature": f"_analysis_signature_{safe}",
+    }
+
+
+def _reset_if_source_changed(source: dict, keys: dict[str, str]) -> None:
+    signature = json.dumps(source, ensure_ascii=False, sort_keys=True, default=str)
+    if st.session_state.get(keys["signature"]) == signature:
         return
-    st.session_state[_DRAFT_SIGNATURE_KEY] = signature
-    st.session_state.pop(_RESULT_KEY, None)
-    st.session_state.pop(_FIELD_STATES_KEY, None)
-    st.session_state.pop(_APPLY_KEY, None)
+    st.session_state[keys["signature"]] = signature
+    st.session_state.pop(keys["result"], None)
+    st.session_state.pop(keys["fields"], None)
+    st.session_state.pop(keys["apply"], None)
 
 
-def _render_field_row(field: str, result: dict, draft: dict, model_id: str) -> None:
-    states = st.session_state.setdefault(_FIELD_STATES_KEY, {})
+def _render_field_row(
+    field: str,
+    result: dict,
+    source_type: str,
+    source: dict,
+    model_id: str,
+    state_key: str,
+    keys: dict[str, str],
+) -> None:
+    states = st.session_state.setdefault(keys["fields"], {})
     states.setdefault(field, True)
 
     with st.container(border=True):
@@ -115,71 +170,128 @@ def _render_field_row(field: str, result: dict, draft: dict, model_id: str) -> N
             states[field] = st.checkbox(
                 "采纳",
                 value=states.get(field, True),
-                key=f"analysis_pick_{field}",
+                key=f"analysis_pick_{state_key}_{field}",
                 label_visibility="collapsed",
             )
         with col_body:
             st.markdown(f"**{_FIELD_LABELS[field]}**")
             st.write(_format_value(result.get(field)))
         with col_retry:
-            if st.button("↺ 重生成", key=f"analysis_retry_open_{field}"):
+            if st.button("↺ 重生成", key=f"analysis_retry_open_{state_key}_{field}"):
                 states[f"{field}_retry_open"] = not states.get(
                     f"{field}_retry_open", False
                 )
 
         if states.get(f"{field}_retry_open", False):
-            _render_retry_controls(field, draft, model_id)
+            _render_retry_controls(field, source_type, source, model_id, state_key)
 
 
-def _render_retry_controls(field: str, draft: dict, model_id: str) -> None:
+def _render_retry_controls(
+    field: str,
+    source_type: str,
+    source: dict,
+    model_id: str,
+    state_key: str,
+) -> None:
     with st.container(border=True):
-        if st.button("再试一次", key=f"analysis_retry_plain_{field}"):
-            _run_analysis(draft, model_id, [field], field=field)
+        if st.button("再试一次", key=f"analysis_retry_plain_{state_key}_{field}"):
+            _run_analysis(
+                source_type, source, model_id, [field], field=field, state_key=state_key
+            )
 
         for hint in _HINTS.get(field, []):
-            if st.button(hint, key=f"analysis_retry_{field}_{hint}"):
-                _run_analysis(draft, model_id, [field], hint=hint, field=field)
+            if st.button(hint, key=f"analysis_retry_{state_key}_{field}_{hint}"):
+                _run_analysis(
+                    source_type,
+                    source,
+                    model_id,
+                    [field],
+                    hint=hint,
+                    field=field,
+                    state_key=state_key,
+                )
 
         st.caption("自定义")
         custom = st.text_input(
             "自定义提示",
-            key=f"analysis_custom_hint_{field}",
+            key=f"analysis_custom_hint_{state_key}_{field}",
             label_visibility="collapsed",
             placeholder="告诉 AI 你想怎么调整",
         )
-        if st.button("提交自定义提示", key=f"analysis_retry_custom_{field}"):
-            _run_analysis(draft, model_id, [field], hint=custom, field=field)
+        if st.button("提交自定义提示", key=f"analysis_retry_custom_{state_key}_{field}"):
+            _run_analysis(
+                source_type,
+                source,
+                model_id,
+                [field],
+                hint=custom,
+                field=field,
+                state_key=state_key,
+            )
 
 
 def _run_analysis(
-    draft: dict,
+    source_type: str,
+    source: dict,
     model_id: str,
     fields: str | list[str],
     *,
     hint: str = "",
     field: str = "",
+    state_key: str,
 ) -> None:
+    keys = _keys(state_key)
     with st.spinner("AI 正在分析…"):
-        skill_result = AnalysisSkill().execute_draft(
-            draft,
-            model_id,
-            fields=fields,
-            hint=hint,
+        runner: Callable = (
+            _run_draft_analysis
+            if source_type == _DRAFT_SOURCE
+            else _run_session_analysis
         )
+        skill_result = runner(source, model_id, fields=fields, hint=hint)
     if not skill_result.success:
         st.error(f"AI 分析失败：{skill_result.error}")
         return
 
     if field:
-        current = dict(st.session_state.get(_RESULT_KEY, {}))
+        current = dict(st.session_state.get(keys["result"], {}))
         current.update(skill_result.data)
-        st.session_state[_RESULT_KEY] = current
+        st.session_state[keys["result"]] = current
     else:
-        st.session_state[_RESULT_KEY] = skill_result.data
-        st.session_state[_FIELD_STATES_KEY] = {
+        st.session_state[keys["result"]] = skill_result.data
+        st.session_state[keys["fields"]] = {
             key: True for key in skill_result.data if key != "new_topics"
         }
     st.rerun()
+
+
+def _run_draft_analysis(
+    draft: dict,
+    model_id: str,
+    *,
+    fields: str | list[str],
+    hint: str,
+):
+    return AnalysisSkill().execute_draft(
+        draft,
+        model_id,
+        fields=fields,
+        hint=hint,
+    )
+
+
+def _run_session_analysis(
+    session: dict,
+    model_id: str,
+    *,
+    fields: str | list[str],
+    hint: str,
+):
+    return AnalysisSkill().execute(
+        session.get("session_id", ""),
+        model_id,
+        fields=fields,
+        hint=hint,
+    )
 
 
 def _format_value(value) -> str:

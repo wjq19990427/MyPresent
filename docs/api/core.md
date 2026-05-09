@@ -394,15 +394,16 @@
 - **副作用**：创建 `data/{final,pending}/{images,videos,text}` + `vector_db/`
 - **幂等**；启动入口 `app.py` 调用
 
-#### `save_session_pending(file_data_list, source_type, field_values, tags=None) -> None`
+#### `save_session_pending(file_data_list, source_type, field_values, tags=None, domains=None, attributes=None, topics=None, emotion_tags=None, emotion_note='', summary='') -> None`
 - **入参**：
   - `file_data_list`：`list[tuple[bytes | file-like, original_name: str]]`
   - `source_type`：`'file'` / `'text'` / `'folder'`
-- **副作用**：写 `data/pending/{sub}/`；插 `sessions` 行（status=pending）
+- **副作用**：写 `data/pending/{sub}/`；插 `sessions` 行（status=pending），透传结构化标签与摘要字段
 - **不写 .md，不 embed**
 
-#### `save_session_final(file_data_list, source_type, field_values, tags=None) -> None`
+#### `save_session_final(file_data_list, source_type, field_values, tags=None, domains=None, attributes=None, topics=None, emotion_tags=None, emotion_note='', summary='') -> None`
 - 同上 + 写 `.md` + 写 `vector_db`；`session_id` 由 `datetime.now()` 生成
+- **结构化字段**：透传到 `create_session()`，用于上传页 AI 分析结果直接保存
 
 #### `move_to_final(session_id: str) -> None`
 - **用途**：物理搬移 pending → final + 更新 DB + 写 .md + embed

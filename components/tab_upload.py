@@ -6,10 +6,30 @@ from pathlib import Path
 import streamlit as st
 
 from core.constants import TEXT_EXTS, SUPPORTED_IMPORT_EXTS, FIELD_SCHEMA
-from core.db_manager import add_tag, get_tags_registry, validate_session
+from core.db_manager import (
+    add_label,
+    add_tag,
+    get_label_registry,
+    get_tags_registry,
+    validate_session,
+)
 from core.file_io import save_session_pending, save_session_final, import_folder_to_pending
 from components.forms import render_field_inputs
 from components.ai_analysis import render_ai_analysis
+
+
+_STRUCTURED_LABEL_TYPES = {
+    "domains": "domain",
+    "attributes": "attribute",
+    "topics": "topic",
+    "emotion_tags": "emotion",
+}
+_STRUCTURED_LABELS = {
+    "domains": "领域",
+    "attributes": "视角",
+    "topics": "话题",
+    "emotion_tags": "情绪",
+}
 
 
 def _pasted_filename(text: str) -> str:
@@ -67,21 +87,70 @@ def _apply_analysis_to_upload_form(result: dict, upload_tags_key: str) -> None:
         if key in result:
             st.session_state[f"upload_{key}"] = result.get(key, "")
 
-    tag_options = set(get_tags_registry())
-    tag_fields = ("domains", "attributes", "topics", "emotion_tags")
+    for key in ("domains", "attributes", "topics", "emotion_tags"):
+        values = _clean_list(result.get(key, []))
+        if key == "topics":
+            values = list(dict.fromkeys([*values, *_clean_list(result.get("new_topics", []))]))
+        st.session_state[f"upload_{key}"] = values
+        _register_structured_labels(key, values)
+
+    if "emotion_note" in result:
+        st.session_state["upload_emotion_note"] = str(result.get("emotion_note") or "")
+
     suggested_tags = []
-    for key in tag_fields:
-        suggested_tags.extend(
-            item for item in (result.get(key, []) or []) if item in tag_options
-        )
-    suggested_tags.extend(
-        item for item in (result.get("new_topics", []) or []) if item in tag_options
-    )
+    suggested_tags.extend(_clean_list(result.get("topics", [])))
+    suggested_tags.extend(_clean_list(result.get("new_topics", [])))
     if suggested_tags:
+        for tag in suggested_tags:
+            add_tag(tag)
         current = st.session_state.get(upload_tags_key, [])
         st.session_state[upload_tags_key] = list(dict.fromkeys([*current, *suggested_tags]))
 
     st.rerun()
+
+
+def _clean_list(value) -> list[str]:
+    if isinstance(value, list):
+        items = value
+    elif value in (None, ""):
+        items = []
+    else:
+        items = [value]
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
+def _register_structured_labels(field: str, values: list[str]) -> None:
+    label_type = _STRUCTURED_LABEL_TYPES.get(field)
+    if not label_type:
+        return
+    for value in values:
+        add_label(value, label_type)
+
+
+def _render_structured_analysis_fields() -> dict:
+    st.markdown("### 🧩 结构化标签")
+    st.caption("AI 分析会填入这些字段，也可手动调整。")
+    values = {}
+    for field, label in _STRUCTURED_LABELS.items():
+        st.session_state.setdefault(f"upload_{field}", [])
+        options = _structured_options(field)
+        values[field] = st.multiselect(label, options=options, key=f"upload_{field}")
+    st.session_state.setdefault("upload_summary", "")
+    st.session_state.setdefault("upload_emotion_note", "")
+    summary = st.text_area("摘要", key="upload_summary", height=90)
+    emotion_note = st.text_area("情绪描述", key="upload_emotion_note", height=90)
+    return {
+        **values,
+        "summary": summary,
+        "emotion_note": emotion_note,
+    }
+
+
+def _structured_options(field: str) -> list[str]:
+    label_type = _STRUCTURED_LABEL_TYPES[field]
+    registry = [item["name"] for item in get_label_registry(label_type)]
+    current = _clean_list(st.session_state.get(f"upload_{field}", []))
+    return list(dict.fromkeys([*registry, *current]))
 
 
 def _consume_upload_prefill() -> tuple[bool, list[str]]:
@@ -287,6 +356,7 @@ def render_upload_tab() -> None:
     analysis_result = render_ai_analysis(
         draft=draft_for_ai,
         model_id=model_id,
+        state_key=f"upload_{st.session_state.upload_key}",
     )
     if analysis_result:
         _apply_analysis_to_upload_form(analysis_result, upload_tags_key)
@@ -313,6 +383,7 @@ def render_upload_tab() -> None:
         label_visibility="collapsed",
         placeholder="至少选择一个标签",
     )
+    structured_values = _render_structured_analysis_fields()
 
     with st.form("upload_meta_form"):
         st.markdown("### 📋 填写记录信息")
@@ -352,7 +423,13 @@ def render_upload_tab() -> None:
                     "请补充后归档，或点「暂存到待处理」先保存。"
                 )
             else:
-                save_session_final(file_data, src_type, field_values, tags=upload_tags)
+                save_session_final(
+                    file_data,
+                    src_type,
+                    field_values,
+                    tags=upload_tags,
+                    **structured_values,
+                )
                 st.session_state.upload_key += 1
                 st.rerun()
 
@@ -360,7 +437,13 @@ def render_upload_tab() -> None:
         if not upload_tags:
             st.error("❌ 请至少选择一个**标签**后再保存。")
         else:
-            save_session_pending(file_data, src_type, field_values, tags=upload_tags)
+            save_session_pending(
+                file_data,
+                src_type,
+                field_values,
+                tags=upload_tags,
+                **structured_values,
+            )
             missing = validate_session(
                 {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
             )

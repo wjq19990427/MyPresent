@@ -66,10 +66,10 @@
   - 归档（仅 pending）→ `move_to_final(sid)`
   - 删除按钮 → `soft_delete_session(sid)`，清空选中态并关闭详情面板
   - 纯文字 session 直接重写源 .txt 文件
-  - AI 推荐的新标签在保存时通过 `add_tag` 自动入库
-- **依赖组件**：`forms.render_field_inputs` / `ai_fill.render_ai_fill_picker` / `ai_tagging.render_ai_tag_picker` / `_render_ai_summary` / `_render_comments`
+  - AI 分析产生的新结构化标签在采纳时通过 `add_label` 自动入库
+- **依赖组件**：`forms.render_field_inputs` / `ai_analysis.render_session_ai_analysis` / `_render_ai_summary` / `_render_comments`
 - **已知陷阱**：widget key 用 `safe_sid = "".join(c if c.isalnum() else "_" for c in sid)` 净化，避免 streamlit 对特殊字符报错
-- **AI 功能位置**：AI 补全在字段编辑区上方；AI 摘要在字段区下方，pending/final 均可用；AI 标签在标签 multiselect 上方
+- **AI 功能位置**：统一 AI 分析在字段编辑区上方，pending/final 均可用；采纳后写入标题、摘要、结构化标签、情绪说明、感受与原因；AI 摘要在字段区下方
 - **保存控件**：详情页使用普通 `st.button` 即时按钮，不再用 `st.form`，避免 AI 组件写入 widget state 后前端不刷新
 
 ### `_render_comments(session) -> None`
@@ -124,6 +124,7 @@
 - **副作用**：归档调 `save_session_final`；暂存调 `save_session_pending`；文件夹模式调 `import_folder_to_pending`
 - **依赖 session_state**：`upload_key`（计数器，提交后 +1，触发 `file_uploader` 重置）/ `upload_prefill`（规划台跳转预填数据，消费后清空）
 - **预填行为**：若 `upload_prefill` 存在，上传页切换到「📝 粘贴文字」，显示 `st.info("✍️ 已从今日规划预填内容，可继续扩充")`，将 `description` 写入粘贴文本框，将 `topics` 补入标签注册表并默认选中，然后立即清空 `upload_prefill`
+- **AI 分析保存**：上传页的统一 AI 分析结果会写入上传表单与结构化标签控件；保存/归档时透传 `domains/attributes/topics/emotion_tags/emotion_note/summary`
 
 ### 内部子组件
 
@@ -150,12 +151,13 @@
 
 ## ai_analysis.py
 
-> 上传草稿的统一 AI 分析面板。基于 `AnalysisSkill.execute_draft()`，替代上传流程中的旧 AI 打标 + AI 补全组合；旧组件仍供详情/归档流程使用。
+> 统一 AI 分析面板。上传草稿走 `AnalysisSkill.execute_draft()`，已有记录详情走 `AnalysisSkill.execute()`，替代上传/待处理/已归档中的旧 AI 打标 + AI 补全组合。
 
-### `render_ai_analysis(draft: dict, model_id: str) -> dict | None`
+### `render_ai_analysis(draft: dict, model_id: str, *, state_key="upload") -> dict | None`
 - **入参**：
   - `draft`：上传表单当前字段值，至少含 `description`
   - `model_id`：当前选中的 LLM 模型 ID
+  - `state_key`：调用方提供的状态命名空间，默认 `"upload"`
 - **行为**：
   - 初始显示「✨ AI 分析」按钮；点击后调用 `AnalysisSkill().execute_draft(draft, model_id, fields="all")`
   - 结果面板按字段展示标题、摘要、领域、视角、话题、情绪、情绪描述、感受、原因
@@ -163,8 +165,16 @@
   - 局部重生成只调用对应字段并合并回缓存，不清空其他字段
   - 支持「全部采纳」与逐项勾选后「采纳勾选项」
 - **返回**：用户采纳后返回已选字段 dict；未操作时返回 `None`
-- **副作用**：读写 `st.session_state` 的 `_analysis_result` / `_analysis_field_states` / `_analysis_apply_payload`；不直接写 DB，不直接写上传表单 widget
+- **副作用**：读写 `st.session_state` 的 `_analysis_result_{state_key}` / `_analysis_field_states_{state_key}` / `_analysis_apply_payload_{state_key}`；不直接写 DB，不直接写上传表单 widget
 - **约束**：不得替代 `tab_upload.py` 做入库；调用方负责把返回值写入表单或标签控件
+
+### `render_session_ai_analysis(session: dict, model_id: str, *, state_key: str) -> dict | None`
+- **入参**：
+  - `session`：已有记录 dict，必须含 `session_id`
+  - `model_id`：当前选中的 LLM 模型 ID
+  - `state_key`：调用方提供的状态命名空间，避免上传页与多个详情面板互相污染
+- **行为/返回**：与 `render_ai_analysis()` 相同，但底层调用 `AnalysisSkill.execute(session_id, ...)`
+- **约束**：不直接写 DB；调用方负责把采纳结果写回 UI widget 和 `update_session_fields()`
 
 ---
 
