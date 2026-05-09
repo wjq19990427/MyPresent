@@ -18,11 +18,24 @@
 | `tab_gallery.py` | 「灵感墙」Tab | ✅ |
 | `tab_archived.py` | 「已归档」Tab | ✅ |
 | `tab_search.py` | 「搜索」Tab（日期 + 语义 + 问答） | ✅ |
+| `tab_home.py` | 「主页」Tab（项目介绍 + 功能模块概览） | ✅ |
 | `eval_dashboard.py` | 「运行看板」Tab | ✅ |
 | `ai_tagging.py` | AI 打标 UI 组件 | ✅ |
 | `ai_fill.py` | AI 感受/原因补全 UI 组件 | ✅ |
 | `tab_recycle.py` | 「回收站」Tab | ✅ |
 | `tab_planning.py` | 「规划控制台」Tab | ✅ |
+
+---
+
+## tab_home.py
+
+> 「主页」Tab。展示项目介绍与 5 个功能模块卡片。
+
+### `render_home() -> None`
+- **功能**：渲染标题区、项目介绍文案，以及「记录台 / 探索 / 规划台 / 回收站 / 系统」5 个模块卡片
+- **布局**：模块卡片使用 `st.columns` 分两行展示；每张卡片使用 `st.container(border=True)` 渲染边框
+- **副作用**：无写库、无 `session_state` 读写、无交互控件
+- **约束**：顶层直接调用，不嵌套在任何 `st.form` 内
 
 ---
 
