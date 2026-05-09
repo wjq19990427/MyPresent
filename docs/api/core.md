@@ -431,6 +431,7 @@
 - **智能问答**：`llm_selected_model` / `llm_chat_history`
 - **LLM 配置编辑**：`_editing_pvd` / `_editing_mdl` / `_draft_provider` / `_draft_model` / `_test_result` / `_draft_test_passed` / `_confirm_edit_pvd` / `_confirm_edit_mdl`
 - **杂项**：`upload_key`
+- **规划控制台**：`planning_sub_tab` / `planning_goal_editing` / `planning_cat_manager_open` / `planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `_reflection_open` / `_postpone_open`
 
 ### 未在此登记的运行期键（隐式）
 

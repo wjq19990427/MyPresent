@@ -50,6 +50,7 @@ def init_state() -> None:
         "planning_cal_month":     datetime.now().month,
         "planning_cal_date":      None,
         "planning_todo_adding":   False,
+        "planning_activity_adding": False,
         "_reflection_open":       {},
         "_postpone_open":         {},
     }.items():

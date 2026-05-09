@@ -1,4 +1,4 @@
-"""规划控制台 Tab：年度规划 + 月度日历待办。"""
+"""规划控制台 Tab：年度规划 + 日历 & 日志。"""
 from __future__ import annotations
 
 import calendar as cal_lib
@@ -19,27 +19,30 @@ from core.db_manager import (
     create_calendar_todo,
     delete_annual_goal,
     delete_calendar_todo,
+    delete_daily_activity,
     get_annual_goal,
     get_annual_goals,
     get_calendar_todos,
+    get_daily_activities,
     get_goal_categories,
     get_todos_by_goal,
     postpone_todo,
     add_goal_category,
+    create_daily_activity,
     delete_goal_category,
     update_annual_goal,
     update_calendar_todo,
 )
 
 
-PRIORITY_BADGE = {"高": "🔴", "中": "🟡", "低": "🟢"}
+PRIORITY_BADGE = {"高": "🔴 高", "中": "🟡 中", "低": "🟢 低"}
 CALENDAR_COL_SPEC = [1, 1, 1, 1, 1, 1, 1]
 WEEK_HEADERS = ["一", "二", "三", "四", "五", "六", "日"]
 MAX_DAY_TODOS = 3
 
 
 def render_planning_tab() -> None:
-    sub1, sub2 = st.tabs(["🎯 年度规划", "📅 月度日历待办"])
+    sub1, sub2 = st.tabs(["🎯 年度规划", "📅 日历 & 日志"])
     with sub1:
         _render_annual_goals()
     with sub2:
@@ -250,6 +253,7 @@ def _render_goal_row(goal: dict) -> None:
 def _render_goal_todo_readonly(todo: dict) -> None:
     is_done = todo["status"] == "已完成"
     status = "已完成" if is_done else "待办"
+    badge = PRIORITY_BADGE.get(todo["priority"], "")
     content = escape(todo["content"])
     content_html = f"<s>{content}</s>" if is_done else content
     postponed = (
@@ -258,7 +262,7 @@ def _render_goal_todo_readonly(todo: dict) -> None:
         else ""
     )
     st.markdown(
-        f"{todo['target_date']} · {status} · {content_html}{postponed}",
+        f"{todo['target_date']} · {badge} · {status} · {content_html}{postponed}",
         unsafe_allow_html=True,
     )
 
@@ -273,6 +277,7 @@ def _render_calendar_todos() -> None:
     day_map: dict[str, list[dict]] = defaultdict(list)
     for todo in todos:
         day_map[todo["target_date"]].append(todo)
+    activity_map = _load_month_activities(year, month)
 
     cols = st.columns(CALENDAR_COL_SPEC)
     for i, header in enumerate(WEEK_HEADERS):
@@ -286,16 +291,20 @@ def _render_calendar_todos() -> None:
         cols = st.columns(CALENDAR_COL_SPEC)
         for i, day_num in enumerate(week):
             with cols[i]:
-                _render_calendar_cell(year, month, day_num, selected_date, day_map)
+                _render_calendar_cell(
+                    year, month, day_num, selected_date, day_map, activity_map
+                )
 
     st.divider()
     selected_date = st.session_state.get("planning_cal_date")
     if selected_date:
-        st.markdown(f"#### 📌 {selected_date} 的待办")
+        st.markdown(f"#### 📌 {selected_date} 的日历 & 日志")
         display_todos = [t for t in todos if t["target_date"] == selected_date]
+        display_activities = activity_map.get(selected_date, [])
     else:
         st.markdown(f"#### 📋 {year} 年 {month} 月全部待办")
         display_todos = todos
+        display_activities = []
 
     action_cols = st.columns([1, 1.4, 3.6] if selected_date else [1, 5])
     with action_cols[0]:
@@ -306,6 +315,8 @@ def _render_calendar_todos() -> None:
             use_container_width=True,
         ):
             _reset_todo_form_date()
+            st.session_state["planning_activity_adding"] = False
+            _reset_activity_form()
             st.session_state["planning_todo_adding"] = True
             st.rerun()
     if selected_date:
@@ -317,10 +328,17 @@ def _render_calendar_todos() -> None:
             ):
                 st.session_state["planning_cal_date"] = None
                 st.session_state["planning_todo_adding"] = False
+                st.session_state["planning_activity_adding"] = False
                 _reset_todo_form_date()
+                _reset_activity_form()
                 st.rerun()
 
     _render_todo_form(selected_date, year, month)
+
+    if selected_date:
+        _render_selected_day_todos(display_todos)
+        _render_daily_activities(selected_date, display_activities)
+        return
 
     if not display_todos:
         st.info("暂无待办。")
@@ -374,12 +392,29 @@ def _set_calendar_month(year: int, month: int) -> None:
     st.session_state["planning_cal_year"] = year
     st.session_state["planning_cal_month"] = month
     st.session_state["planning_cal_date"] = None
+    st.session_state["planning_activity_adding"] = False
     _reset_todo_form_date()
+    _reset_activity_form()
     st.rerun()
 
 
 def _reset_todo_form_date() -> None:
     st.session_state.pop("tf_date", None)
+
+
+def _reset_activity_form() -> None:
+    for key in ("af_description", "af_category", "af_duration"):
+        st.session_state.pop(key, None)
+
+
+def _load_month_activities(year: int, month: int) -> dict[str, list[dict]]:
+    activity_map: dict[str, list[dict]] = defaultdict(list)
+    for day_num in range(1, cal_lib.monthrange(year, month)[1] + 1):
+        d_str = f"{year:04d}-{month:02d}-{day_num:02d}"
+        activities = get_daily_activities(d_str)
+        if activities:
+            activity_map[d_str] = activities
+    return activity_map
 
 
 def _render_calendar_cell(
@@ -388,6 +423,7 @@ def _render_calendar_cell(
     day_num: int,
     selected_date: str | None,
     day_map: dict[str, list[dict]],
+    activity_map: dict[str, list[dict]],
 ) -> None:
     if day_num == 0:
         st.markdown(
@@ -400,23 +436,33 @@ def _render_calendar_cell(
     is_today = d_str == str(date.today())
     is_selected = d_str == selected_date
     day_todos = day_map.get(d_str, [])
+    day_activities = activity_map.get(d_str, [])
     if st.button(
-        _calendar_cell_label(day_num, is_today, day_todos),
+        _calendar_cell_label(day_num, is_today, day_todos, day_activities),
         key=f"cal_{d_str}",
         type="primary" if is_selected else "secondary",
         use_container_width=True,
         help=f"选择 {d_str}",
     ):
         st.session_state["planning_cal_date"] = d_str
+        st.session_state["planning_activity_adding"] = False
+        _reset_activity_form()
         _reset_todo_form_date()
         st.rerun()
 
 
-def _calendar_cell_label(day_num: int, is_today: bool, todos: list[dict]) -> str:
+def _calendar_cell_label(
+    day_num: int,
+    is_today: bool,
+    todos: list[dict],
+    activities: list[dict],
+) -> str:
     day_label = f"📍 **{day_num}**" if is_today else str(day_num)
     summaries = [_calendar_todo_summary(t) for t in todos[:MAX_DAY_TODOS]]
     if len(todos) > MAX_DAY_TODOS:
         summaries.append(f"+{len(todos) - MAX_DAY_TODOS} 更多")
+    if activities:
+        summaries.append(f"📝 事务 {len(activities)} 条")
     if not summaries:
         summaries = [" "]
     return "\n\n".join([day_label, *summaries])
@@ -428,6 +474,91 @@ def _calendar_todo_summary(todo: dict) -> str:
     if todo["status"] == "已完成":
         content = f"~~{content}~~"
     return f"{badge} {content}"
+
+
+def _render_selected_day_todos(todos: list[dict]) -> None:
+    st.markdown("#### ✅ 待办事宜")
+    if not todos:
+        st.info("当日暂无待办。")
+        return
+    for todo in todos:
+        _render_todo_row(todo)
+
+
+def _render_daily_activities(selected_date: str, activities: list[dict]) -> None:
+    st.markdown("#### 📝 今日事务")
+    action_cols = st.columns([2, 4])
+    with action_cols[0]:
+        if st.button(
+            "📝 记录今日事务",
+            key="add_activity_btn",
+            type="primary",
+            use_container_width=True,
+        ):
+            _reset_activity_form()
+            st.session_state["planning_todo_adding"] = False
+            st.session_state["planning_activity_adding"] = True
+            st.rerun()
+
+    _render_activity_form(selected_date)
+
+    if not activities:
+        st.info("当日暂无事务记录。")
+        return
+    for activity in activities:
+        _render_activity_row(activity)
+
+
+def _render_activity_form(selected_date: str) -> None:
+    if not st.session_state.get("planning_activity_adding"):
+        return
+
+    with st.container(border=True):
+        st.markdown("#### 📝 记录今日事务")
+        description = st.text_area("事务描述 *", key="af_description")
+        category = st.selectbox("分类 *", TODO_CATEGORIES, key="af_category")
+        duration = st.number_input(
+            "时长（分钟）",
+            min_value=0,
+            max_value=1440,
+            value=0,
+            step=5,
+            key="af_duration",
+        )
+
+        ca, cb = st.columns(2)
+        with ca:
+            if st.button("💾 保存", key="af_save", type="primary"):
+                if description.strip():
+                    create_daily_activity(
+                        selected_date,
+                        description.strip(),
+                        category,
+                        int(duration),
+                    )
+                    st.session_state["planning_activity_adding"] = False
+                    st.rerun()
+                else:
+                    st.warning("事务描述为必填项")
+        with cb:
+            if st.button("取消", key="af_cancel"):
+                st.session_state["planning_activity_adding"] = False
+                st.rerun()
+
+
+def _render_activity_row(activity: dict) -> None:
+    duration = int(activity.get("duration") or 0)
+    duration_text = f"{duration} 分钟" if duration > 0 else "未记录时长"
+    description = escape(activity["description"])
+    with st.container(border=True):
+        c1, c2 = st.columns([5, 1])
+        with c1:
+            st.markdown(description, unsafe_allow_html=True)
+            st.caption(f"{activity['category']} · {duration_text}")
+        with c2:
+            if st.button("🗑️", key=f"ad_{activity['id']}", help="删除"):
+                delete_daily_activity(activity["id"])
+                st.rerun()
 
 
 def _render_todo_form(selected_date: str | None, year: int, month: int) -> None:
