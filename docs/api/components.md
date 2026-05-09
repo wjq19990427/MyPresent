@@ -271,6 +271,12 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **依赖 session_state**：`planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_goal_editing` / `planning_cat_manager_open`
 - **视觉约定**：优先级徽标 `高=🔴`、`中=🟡`、`低=🟢`；`已完成` / `已搁置` 目标使用删除线
 
+#### `_render_goal_row(goal: dict) -> None`
+- **功能**：渲染单条年度目标；有关联待办时额外显示整体进度（已完成数 / 总数 + 进度条），并提供只读展开区查看关联待办
+- **数据来源**：调用 `get_todos_by_goal(goal["id"])`
+- **展开区约束**：只展示待办日期、内容摘要、完成状态、延期次数标记；不提供 checkbox、删除、延期等任何写操作
+- **无关联待办**：不渲染进度与展开区，保持普通目标行样式
+
 #### `_render_goal_form(editing: str, category_names: list[str]) -> None`
 - **入参**：`"NEW"` 表示新增；否则为 `annual_goals.id`
 - **功能**：编辑 `content/category/priority/deadline/status`；分类下拉使用 `category_names`

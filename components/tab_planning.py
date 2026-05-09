@@ -23,6 +23,7 @@ from core.db_manager import (
     get_annual_goals,
     get_calendar_todos,
     get_goal_categories,
+    get_todos_by_goal,
     postpone_todo,
     add_goal_category,
     delete_goal_category,
@@ -207,6 +208,8 @@ def _render_goal_row(goal: dict) -> None:
     title = goal["content"][:60]
     if is_done:
         title = f"~~{title}~~"
+    todos = get_todos_by_goal(goal["id"])
+    done_count = sum(1 for t in todos if t["status"] == "已完成")
 
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns([5, 2, 1, 1])
@@ -234,6 +237,30 @@ def _render_goal_row(goal: dict) -> None:
             if st.button("🗑️", key=f"gd_{goal['id']}", help="删除"):
                 delete_annual_goal(goal["id"])
                 st.rerun()
+
+        if todos:
+            progress = done_count / len(todos)
+            st.caption(f"关联待办进度：{done_count} / {len(todos)}")
+            st.progress(progress)
+            with st.expander("查看关联待办", expanded=False):
+                for todo in todos:
+                    _render_goal_todo_readonly(todo)
+
+
+def _render_goal_todo_readonly(todo: dict) -> None:
+    is_done = todo["status"] == "已完成"
+    status = "已完成" if is_done else "待办"
+    content = escape(todo["content"])
+    content_html = f"<s>{content}</s>" if is_done else content
+    postponed = (
+        f" · 延期 {todo.get('postpone_count', 0)} 次"
+        if todo.get("postpone_count", 0) > 0
+        else ""
+    )
+    st.markdown(
+        f"{todo['target_date']} · {status} · {content_html}{postponed}",
+        unsafe_allow_html=True,
+    )
 
 
 def _render_calendar_todos() -> None:
