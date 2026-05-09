@@ -23,12 +23,16 @@ from core.db_manager import (
     get_annual_goal,
     get_annual_goals,
     get_calendar_todos,
+    postpone_todo,
     update_annual_goal,
     update_calendar_todo,
 )
 
 
 PRIORITY_BADGE = {"高": "🔴", "中": "🟡", "低": "🟢"}
+CALENDAR_COL_SPEC = [1, 1, 1, 1, 1, 1, 1]
+WEEK_HEADERS = ["一", "二", "三", "四", "五", "六", "日"]
+MAX_DAY_TODOS = 3
 
 
 def render_planning_tab() -> None:
@@ -189,70 +193,26 @@ def _render_calendar_todos() -> None:
     year = st.session_state.get("planning_cal_year", datetime.now().year)
     month = st.session_state.get("planning_cal_month", datetime.now().month)
 
-    nc1, nc2, nc3 = st.columns([1, 3, 1])
-    with nc1:
-        if st.button("◀", key="cal_prev"):
-            if month == 1:
-                st.session_state["planning_cal_year"] = year - 1
-                st.session_state["planning_cal_month"] = 12
-            else:
-                st.session_state["planning_cal_month"] = month - 1
-            st.session_state["planning_cal_date"] = None
-            st.rerun()
-    with nc2:
-        st.markdown(
-            f"<h4 style='text-align:center'>{year} 年 {month} 月</h4>",
-            unsafe_allow_html=True,
-        )
-    with nc3:
-        if st.button("▶", key="cal_next"):
-            if month == 12:
-                st.session_state["planning_cal_year"] = year + 1
-                st.session_state["planning_cal_month"] = 1
-            else:
-                st.session_state["planning_cal_month"] = month + 1
-            st.session_state["planning_cal_date"] = None
-            st.rerun()
+    _render_month_nav(year, month)
 
     todos = get_calendar_todos(year=year, month=month)
     day_map: dict[str, list[dict]] = defaultdict(list)
     for todo in todos:
         day_map[todo["target_date"]].append(todo)
 
-    headers = ["一", "二", "三", "四", "五", "六", "日"]
-    cols = st.columns(7)
-    for i, header in enumerate(headers):
-        cols[i].markdown(f"**{header}**")
+    cols = st.columns(CALENDAR_COL_SPEC)
+    for i, header in enumerate(WEEK_HEADERS):
+        cols[i].markdown(
+            f"<div style='text-align:center;font-weight:600'>{header}</div>",
+            unsafe_allow_html=True,
+        )
 
     selected_date = st.session_state.get("planning_cal_date")
     for week in cal_lib.monthcalendar(year, month):
-        cols = st.columns(7)
+        cols = st.columns(CALENDAR_COL_SPEC)
         for i, day_num in enumerate(week):
             with cols[i]:
-                if day_num == 0:
-                    st.write(" ")
-                    continue
-                d_str = f"{year:04d}-{month:02d}-{day_num:02d}"
-                is_today = d_str == str(date.today())
-                is_selected = d_str == selected_date
-                day_todos = day_map.get(d_str, [])
-                label = f"**{day_num}**" if is_today else str(day_num)
-                btn_type = "primary" if is_selected else "secondary"
-                if st.button(
-                    label,
-                    key=f"cal_{d_str}",
-                    type=btn_type,
-                    use_container_width=True,
-                ):
-                    st.session_state["planning_cal_date"] = d_str
-                    st.rerun()
-                if day_todos:
-                    badges = "".join(
-                        PRIORITY_BADGE.get(t["priority"], "·") for t in day_todos[:3]
-                    )
-                    if len(day_todos) > 3:
-                        badges += f"+{len(day_todos) - 3}"
-                    st.caption(badges)
+                _render_calendar_cell(year, month, day_num, selected_date, day_map)
 
     st.divider()
     selected_date = st.session_state.get("planning_cal_date")
@@ -274,6 +234,101 @@ def _render_calendar_todos() -> None:
         return
     for todo in display_todos:
         _render_todo_row(todo)
+
+
+def _render_month_nav(year: int, month: int) -> None:
+    nav_cols = st.columns([1, 1.2, 1, 1, 1])
+    with nav_cols[0]:
+        if st.button("◀", key="cal_prev", use_container_width=True):
+            if month == 1:
+                _set_calendar_month(year - 1, 12)
+            else:
+                _set_calendar_month(year, month - 1)
+    with nav_cols[1]:
+        st.markdown(
+            f"<h4 style='text-align:center;margin-top:.35rem'>{year} 年 {month} 月</h4>",
+            unsafe_allow_html=True,
+        )
+    with nav_cols[2]:
+        jump_year = st.number_input(
+            "年份",
+            min_value=1970,
+            max_value=2100,
+            value=int(year),
+            step=1,
+            key=f"cal_jump_year_{year}_{month}",
+        )
+    with nav_cols[3]:
+        jump_month = st.selectbox(
+            "月份",
+            list(range(1, 13)),
+            index=int(month) - 1,
+            key=f"cal_jump_month_{year}_{month}",
+            format_func=lambda m: f"{m} 月",
+        )
+    with nav_cols[4]:
+        if st.button("▶", key="cal_next", use_container_width=True):
+            if month == 12:
+                _set_calendar_month(year + 1, 1)
+            else:
+                _set_calendar_month(year, month + 1)
+
+    if int(jump_year) != year or int(jump_month) != month:
+        _set_calendar_month(int(jump_year), int(jump_month))
+
+
+def _set_calendar_month(year: int, month: int) -> None:
+    st.session_state["planning_cal_year"] = year
+    st.session_state["planning_cal_month"] = month
+    st.session_state["planning_cal_date"] = None
+    st.rerun()
+
+
+def _render_calendar_cell(
+    year: int,
+    month: int,
+    day_num: int,
+    selected_date: str | None,
+    day_map: dict[str, list[dict]],
+) -> None:
+    if day_num == 0:
+        st.markdown(
+            "<div style='min-height:7.5rem;border:1px solid transparent'></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    d_str = f"{year:04d}-{month:02d}-{day_num:02d}"
+    is_today = d_str == str(date.today())
+    is_selected = d_str == selected_date
+    day_todos = day_map.get(d_str, [])
+    if st.button(
+        _calendar_cell_label(day_num, is_today, day_todos),
+        key=f"cal_{d_str}",
+        type="primary" if is_selected else "secondary",
+        use_container_width=True,
+        help=f"选择 {d_str}",
+    ):
+        st.session_state["planning_cal_date"] = d_str
+        st.rerun()
+
+
+def _calendar_cell_label(day_num: int, is_today: bool, todos: list[dict]) -> str:
+    day_label = f"📍 **{day_num}**" if is_today else str(day_num)
+    summaries = [_calendar_todo_summary(t) for t in todos[:MAX_DAY_TODOS]]
+    if len(todos) > MAX_DAY_TODOS:
+        summaries.append(f"+{len(todos) - MAX_DAY_TODOS} 更多")
+    if not summaries:
+        summaries = [" "]
+    return "\n\n".join([day_label, *summaries])
+
+
+def _calendar_todo_summary(todo: dict) -> str:
+    badge = PRIORITY_BADGE.get(todo["priority"], "·")
+    content = todo["content"][:18]
+    if todo["status"] == "已完成":
+        content = f"~~{content}~~"
+    return f"{badge} {content}"
 
 
 def _render_todo_form(selected_date: str | None, year: int, month: int) -> None:
@@ -332,9 +387,10 @@ def _render_todo_row(todo: dict) -> None:
     content_html = f"<s>{content}</s>" if is_done else content
     color_style = "color:gray;" if is_done else ""
     reflection_open = st.session_state.get("_reflection_open", {}).get(tid, False)
+    postpone_open = st.session_state.get("_postpone_open", {}).get(tid, False)
 
     with st.container(border=True):
-        rc1, rc2, rc3 = st.columns([0.5, 6, 1])
+        rc1, rc2, rc3, rc4 = st.columns([0.5, 5.5, 1, 1])
         with rc1:
             checked = st.checkbox(
                 "",
@@ -356,14 +412,31 @@ def _render_todo_row(todo: dict) -> None:
                 unsafe_allow_html=True,
             )
             linked = " · 🔗 关联目标" if todo.get("linked_goal_id") else ""
-            st.caption(f"{todo['category']} · {todo['recurrence']}{linked}")
+            postponed = (
+                f" · 延期 {todo.get('postpone_count', 0)} 次"
+                if todo.get("postpone_count", 0) > 0
+                else ""
+            )
+            st.caption(
+                f"{todo['target_date']} · {todo['category']} · "
+                f"{todo['recurrence']}{linked}{postponed}"
+            )
         with rc3:
+            if not is_done and st.button("延期", key=f"tp_{tid}", help="延期"):
+                postpone_state = st.session_state.get("_postpone_open", {})
+                postpone_state[tid] = True
+                st.session_state["_postpone_open"] = postpone_state
+                postpone_open = True
+        with rc4:
             if st.button("🗑️", key=f"td_{tid}", help="删除"):
                 delete_calendar_todo(tid)
                 st.rerun()
 
         if reflection_open:
             _render_reflection_box(tid)
+
+        if postpone_open:
+            _render_postpone_box(tid)
 
         if is_done and todo.get("reflection"):
             st.caption(f"💬 {todo['reflection']}")
@@ -395,6 +468,36 @@ def _close_reflection(todo_id: str) -> None:
     reflection_state = st.session_state.get("_reflection_open", {})
     reflection_state.pop(todo_id, None)
     st.session_state["_reflection_open"] = reflection_state
+
+
+def _render_postpone_box(todo_id: str) -> None:
+    with st.container(border=True):
+        st.caption("选择延期天数")
+        days = st.number_input(
+            "延期天数",
+            min_value=1,
+            max_value=365,
+            value=1,
+            step=1,
+            key=f"postpone_days_{todo_id}",
+            label_visibility="collapsed",
+        )
+        ca, cb = st.columns(2)
+        with ca:
+            if st.button("确认延期", key=f"postpone_ok_{todo_id}", type="primary"):
+                postpone_todo(todo_id, int(days))
+                _close_postpone(todo_id)
+                st.rerun()
+        with cb:
+            if st.button("取消", key=f"postpone_cancel_{todo_id}"):
+                _close_postpone(todo_id)
+                st.rerun()
+
+
+def _close_postpone(todo_id: str) -> None:
+    postpone_state = st.session_state.get("_postpone_open", {})
+    postpone_state.pop(todo_id, None)
+    st.session_state["_postpone_open"] = postpone_state
 
 
 def _parse_date(value: str | None) -> date | None:
