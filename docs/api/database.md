@@ -41,6 +41,8 @@
 | `description` | TEXT | default `''` | 描述（纯文字记录时为正文） |
 | `feeling` | TEXT | default `''` | 必填字段（见 `FIELD_SCHEMA`） |
 | `reason` | TEXT | default `''` | 选填 |
+| `title` | TEXT | default `''` | 标题；必填字段（见 `FIELD_SCHEMA`）；历史库启动时由 `description[:20]` 回填 |
+| `summary` | TEXT | default `''` | 摘要；仅存库，不参与 `is_complete` |
 | `is_complete` | INTEGER | NOT NULL, default `0` | 必填项是否齐全（0/1） |
 | `upload_time` | TEXT | NOT NULL | `YYYY-MM-DD HH:MM:SS` |
 | `archive_time` | TEXT | default `''` | 归档时刻；pending 为空 |

@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     description  TEXT    DEFAULT '',
     feeling      TEXT    DEFAULT '',
     reason       TEXT    DEFAULT '',
+    title        TEXT    DEFAULT '',
+    summary      TEXT    DEFAULT '',
     is_complete  INTEGER NOT NULL DEFAULT 0,
     upload_time  TEXT    NOT NULL,
     archive_time TEXT    DEFAULT '',
@@ -184,6 +186,7 @@ CREATE TABLE IF NOT EXISTS session_linked_goals (
 def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
         conn.executescript(_SCHEMA)
         _cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
         if "deleted_at" not in _cols:
@@ -195,6 +198,9 @@ def init_db() -> None:
         _add_column_if_missing(conn, "sessions", "topics", "TEXT DEFAULT '[]'")
         _add_column_if_missing(conn, "sessions", "emotion_tags", "TEXT DEFAULT '[]'")
         _add_column_if_missing(conn, "sessions", "emotion_note", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, "sessions", "title", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, "sessions", "summary", "TEXT DEFAULT ''")
+        _backfill_session_titles(conn)
         _todo_cols = {r[1] for r in conn.execute("PRAGMA table_info(calendar_todos)")}
         if "postpone_count" not in _todo_cols:
             conn.execute(
@@ -246,6 +252,18 @@ def _seed_label_registry(conn: sqlite3.Connection) -> None:
             )
 
 
+def _backfill_session_titles(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        "SELECT id, description FROM sessions WHERE title IS NULL OR title=''"
+    ).fetchall()
+    for row in rows:
+        conn.execute(
+            "UPDATE sessions SET title=? WHERE id=?",
+            ((row["description"] or "")[:20], row["id"]),
+        )
+    return len(rows)
+
+
 def migrate_tags_to_topics() -> int:
     updated = 0
     with _conn() as conn:
@@ -259,6 +277,8 @@ def migrate_tags_to_topics() -> int:
         _add_column_if_missing(conn, "sessions", "topics", "TEXT DEFAULT '[]'")
         _add_column_if_missing(conn, "sessions", "emotion_tags", "TEXT DEFAULT '[]'")
         _add_column_if_missing(conn, "sessions", "emotion_note", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, "sessions", "title", "TEXT DEFAULT ''")
+        _add_column_if_missing(conn, "sessions", "summary", "TEXT DEFAULT ''")
         rows = conn.execute(
             "SELECT id, topics, domains FROM sessions "
             "WHERE topics IS NULL OR topics='' OR topics='[]'"
@@ -366,6 +386,8 @@ def _row_to_dict(row: sqlite3.Row, aux: tuple) -> dict:
         "description":  row["description"]  or "",
         "feeling":      row["feeling"]       or "",
         "reason":       row["reason"]        or "",
+        "title":        row["title"]         or "",
+        "summary":      row["summary"]       or "",
         "is_complete":  bool(row["is_complete"]),
         "upload_time":  row["upload_time"],
         "archive_time": row["archive_time"]  or "",
@@ -441,25 +463,33 @@ def create_session(
     topics: list[str] | None = None,
     emotion_tags: list[str] | None = None,
     emotion_note: str = "",
+    title: str = "",
+    summary: str = "",
 ) -> dict:
     """插入新 session，返回 session dict。"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     fields = {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
+    if title:
+        fields["title"] = title.strip()
+    summary = summary.strip()
     is_complete = int(not _missing_fields(fields))
 
     with _conn() as conn:
         conn.execute(
             """INSERT INTO sessions
                (id, status, source_type, content_time, description,
-                feeling, reason, is_complete, upload_time, archive_time,
-                domains, attributes, topics, emotion_tags, emotion_note)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                feeling, reason, title, summary, is_complete, upload_time,
+                archive_time, domains, attributes, topics, emotion_tags,
+                emotion_note)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 session_id, status, source_type,
                 fields.get("content_time", ""),
                 fields.get("description", ""),
                 fields.get("feeling", ""),
                 fields.get("reason", ""),
+                fields.get("title", ""),
+                summary,
                 is_complete, now, archive_time,
                 _json_dump_list(domains),
                 _json_dump_list(attributes),
@@ -521,6 +551,11 @@ def update_session_fields(session_id: str, new_values: dict) -> None:
         if "emotion_note" in new_values
         else session.get("emotion_note", "")
     )
+    summary = (
+        str(new_values.get("summary", "")).strip()
+        if "summary" in new_values
+        else session.get("summary", "")
+    )
 
     fields = {
         f["key"]: str(new_values.get(f["key"], session.get(f["key"], ""))).strip()
@@ -552,14 +587,17 @@ def update_session_fields(session_id: str, new_values: dict) -> None:
 
         conn.execute(
             """UPDATE sessions SET
-               content_time=?, description=?, feeling=?, reason=?, is_complete=?,
-               domains=?, attributes=?, topics=?, emotion_tags=?, emotion_note=?
+               content_time=?, description=?, feeling=?, reason=?, title=?,
+               summary=?, is_complete=?, domains=?, attributes=?, topics=?,
+               emotion_tags=?, emotion_note=?
                WHERE id=?""",
             (
                 fields.get("content_time", ""),
                 fields.get("description", ""),
                 fields.get("feeling", ""),
                 fields.get("reason", ""),
+                fields.get("title", ""),
+                summary,
                 is_complete,
                 domains,
                 attributes,

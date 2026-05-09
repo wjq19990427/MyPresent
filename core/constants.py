@@ -70,6 +70,14 @@ FIELD_SCHEMA: list[dict] = [
         "placeholder": "为什么想要记录这段内容？（选填）",
         "help":        "选填",
     },
+    {
+        "key":         "title",
+        "label":       "标题",
+        "required":    True,
+        "type":        "text",
+        "placeholder": "为这条记录取个名字",
+        "help":        "必填",
+    },
 ]
 
 REQUIRED_KEYS: list[str] = [f["key"] for f in FIELD_SCHEMA if f["required"]]

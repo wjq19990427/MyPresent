@@ -35,7 +35,7 @@
 - **用途**：创建库 + 全部表（如不存在）+ 灌入 `DEFAULT_TAGS` / `label_registry` 系统种子
 - **副作用**：写 `data/database.db`；幂等
 - **调用时机**：`app.py` 启动 / `migrate.py`
-- **迁移行为**：幂等补齐 `sessions.domains/attributes/topics/emotion_tags/emotion_note` 五列，并自动调用 `migrate_tags_to_topics()`
+- **迁移行为**：幂等补齐 `sessions.domains/attributes/topics/emotion_tags/emotion_note/title/summary` 七列；对空 `title` 用 `description[:20]` 回填（不重算历史 `is_complete`），并自动调用 `migrate_tags_to_topics()`
 
 #### `migrate_tags_to_topics() -> int`
 - **用途**：一次性把旧 `session_tags` 平移到 `sessions.topics`
@@ -46,26 +46,29 @@
 ### Session CRUD
 
 #### `load_db() -> list[dict]`
-- **返回**：所有未软删除 session（按 `upload_time DESC`），每条含 `files / tags / group_ids / edit_history / comments`，以及结构化标签字段 `domains / attributes / topics / emotion_tags / emotion_note`
+- **返回**：所有未软删除 session（按 `upload_time DESC`），每条含 `files / tags / group_ids / edit_history / comments`，业务字段 `title / summary`，以及结构化标签字段 `domains / attributes / topics / emotion_tags / emotion_note`
 - **副作用**：无
 
 #### `get_session(session_id: str) -> dict | None`
 - **返回**：单条 session 完整 dict，未找到返回 `None`
 - **结构化标签**：`domains / attributes / topics / emotion_tags` 返回 list；坏 JSON / 空值降级为 `[]`；`emotion_note` 空值降级为 `''`
+- **业务字段**：`title / summary` 空值降级为 `''`
 
-#### `create_session(session_id, file_entries, source_type, field_values, tags=None, status='pending', archive_time='', domains=None, attributes=None, topics=None, emotion_tags=None, emotion_note='') -> dict`
+#### `create_session(session_id, file_entries, source_type, field_values, tags=None, status='pending', archive_time='', domains=None, attributes=None, topics=None, emotion_tags=None, emotion_note='', title='', summary='') -> dict`
 - **副作用**：插入 `sessions` + `session_files` + `session_tags`；自动计算 `is_complete`
 - **结构化标签**：新增可选参数均保持旧调用兼容；列表字段写库前 JSON 序列化，`None` 等同 `[]`
+- **标题/摘要**：`title` 可作为可选参数写入，也可由 `field_values["title"]` 写入；`title` 参与 `is_complete`，`summary` 仅存库、不参与完整度
 - **返回**：完整 session dict
 - **异常**：违反 NOT NULL 约束时抛 `sqlite3.IntegrityError`
 
 #### `update_session_fields(session_id, new_values: dict) -> None`
-- **入参**：`new_values` 可含 `FIELD_SCHEMA` 字段 + 可选 `tags` / `group_ids` / `domains` / `attributes` / `topics` / `emotion_tags` / `emotion_note`
+- **入参**：`new_values` 可含 `FIELD_SCHEMA` 字段（含 `title`）+ 可选 `summary` / `tags` / `group_ids` / `domains` / `attributes` / `topics` / `emotion_tags` / `emotion_note`
 - **副作用**：
   - Final 记录额外写 `edit_history`（仅业务字段，标签/分组不计）
   - Final 记录会**重写 `.md`** 并**重新 embed**（隐式调 `file_io._write_md` + `vector_db.embed_session`）
 - **不变量**：纯文字 session 跳过 `description` 的 diff（避免误记历史）
 - **结构化标签**：列表字段写库前 JSON 序列化；未传入的结构化标签字段保持原值
+- **标题/摘要**：`title` 随 `FIELD_SCHEMA` 参与 `is_complete` 和业务字段历史；`summary` 写库但不计入完整度
 
 #### `update_session_tags(session_id, tags: list[str]) -> None`
 - **副作用**：替换 `session_tags`；Final 记录会重新 embed（**不**写 `.md`，**不**记历史）
@@ -528,14 +531,14 @@
 
 | 键 | 类型 | 说明 |
 |----|------|------|
-| `key` | str | 标识；同时是 SQL 列名（业务字段 `content_time / description / feeling / reason`） |
+| `key` | str | 标识；同时是 SQL 列名（业务字段 `content_time / description / feeling / reason / title`） |
 | `label` | str | 表单与 .md 中的显示名 |
 | `required` | bool | 影响 `is_complete` 与归档放行 |
 | `type` | str | `textarea` / `text` / `date_or_text` |
 | `placeholder` | str | UI 占位 |
 | `help` | str | UI 帮助文字 |
 
-**当前 4 字段**：`content_time`(必) → `description`(必) → `feeling`(必) → `reason`(选)
+**当前 5 字段**：`content_time`(必) → `description`(必) → `feeling`(必) → `reason`(选) → `title`(必)
 **派生**：`REQUIRED_KEYS = [k for f in FIELD_SCHEMA if f["required"]]`
 
 ### 扩展规则（重要 · 当前最大紧耦合点）
@@ -545,6 +548,6 @@
 2. 在 `db_manager._SCHEMA` 的 `sessions` 表加列 ⚠️
 3. 在 `db_manager._row_to_dict` 加字段映射 ⚠️
 4. 在 `db_manager.create_session` / `update_session_fields` 字段抽取里加 key ⚠️
-5. 历史库手工 `ALTER TABLE sessions ADD COLUMN ...` ⚠️
+5. 在 `init_db()` 的幂等迁移里补 `ALTER TABLE sessions ADD COLUMN ...`，必要时回填历史数据 ⚠️
 
 > 这是当前架构遗留的最大紧耦合点，值得在未来重构里优先打破（候选方案：`sessions` 改为 K/V `session_fields` 表，业务字段全部走 EAV）。
