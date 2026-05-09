@@ -35,7 +35,11 @@ from core.db_manager import (
 )
 
 
-PRIORITY_BADGE = {"高": "🔴 高", "中": "🟡 中", "低": "🟢 低"}
+PRIORITY_COLORS = {
+    "高": ("#b91c1c", "#fee2e2", "#fecaca"),
+    "中": ("#a16207", "#fef3c7", "#fde68a"),
+    "低": ("#15803d", "#dcfce7", "#bbf7d0"),
+}
 CALENDAR_COL_SPEC = [1, 1, 1, 1, 1, 1, 1]
 WEEK_HEADERS = ["一", "二", "三", "四", "五", "六", "日"]
 MAX_DAY_TODOS = 3
@@ -206,18 +210,21 @@ def _remove_goal_filter_value(name: str) -> None:
 
 
 def _render_goal_row(goal: dict) -> None:
-    badge = PRIORITY_BADGE.get(goal["priority"], "")
+    priority_label = _priority_label(goal["priority"])
     is_done = goal["status"] in ("已完成", "已搁置")
-    title = goal["content"][:60]
+    title = escape(goal["content"][:60])
     if is_done:
-        title = f"~~{title}~~"
+        title = f"<s>{title}</s>"
     todos = get_todos_by_goal(goal["id"])
     done_count = sum(1 for t in todos if t["status"] == "已完成")
 
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns([5, 2, 1, 1])
         with c1:
-            st.markdown(f"{badge} {title}")
+            st.markdown(
+                f"{priority_label}<span>{title}</span>",
+                unsafe_allow_html=True,
+            )
             st.caption(
                 f"{goal['category']} · 截止 {goal['deadline']} · {goal['status']}"
             )
@@ -253,7 +260,7 @@ def _render_goal_row(goal: dict) -> None:
 def _render_goal_todo_readonly(todo: dict) -> None:
     is_done = todo["status"] == "已完成"
     status = "已完成" if is_done else "待办"
-    badge = PRIORITY_BADGE.get(todo["priority"], "")
+    priority_label = _priority_label(todo["priority"])
     content = escape(todo["content"])
     content_html = f"<s>{content}</s>" if is_done else content
     postponed = (
@@ -262,7 +269,8 @@ def _render_goal_todo_readonly(todo: dict) -> None:
         else ""
     )
     st.markdown(
-        f"{todo['target_date']} · {badge} · {status} · {content_html}{postponed}",
+        f"{todo['target_date']} · {priority_label} · {status} · "
+        f"{content_html}{postponed}",
         unsafe_allow_html=True,
     )
 
@@ -469,11 +477,38 @@ def _calendar_cell_label(
 
 
 def _calendar_todo_summary(todo: dict) -> str:
-    badge = PRIORITY_BADGE.get(todo["priority"], "·")
+    priority_text = _priority_text(todo["priority"])
     content = todo["content"][:18]
     if todo["status"] == "已完成":
         content = f"~~{content}~~"
-    return f"{badge} {content}"
+    return f"{priority_text} {content}"
+
+
+def _priority_text(priority: str) -> str:
+    return f"优先级：{priority}" if priority in PRIORITY_COLORS else "优先级：未定"
+
+
+def _priority_label(priority: str) -> str:
+    color, bg, border = PRIORITY_COLORS.get(
+        priority, ("#475569", "#f8fafc", "#cbd5e1")
+    )
+    return (
+        "<span style=\""
+        "display:inline-flex;"
+        "align-items:center;"
+        "padding:0.08rem 0.42rem;"
+        "border-radius:0.35rem;"
+        f"border:1px solid {border};"
+        f"background:{bg};"
+        f"color:{color};"
+        "font-size:0.78rem;"
+        "font-weight:600;"
+        "line-height:1.35;"
+        "white-space:nowrap;"
+        "vertical-align:middle;"
+        "margin-right:0.35rem;"
+        f"\">优先级：{escape(priority) if priority else '未定'}</span>"
+    )
 
 
 def _render_selected_day_todos(todos: list[dict]) -> None:
@@ -612,7 +647,7 @@ def _render_todo_form(selected_date: str | None, year: int, month: int) -> None:
 def _render_todo_row(todo: dict) -> None:
     tid = todo["id"]
     is_done = todo["status"] == "已完成"
-    badge = PRIORITY_BADGE.get(todo["priority"], "")
+    priority_label = _priority_label(todo["priority"])
     content = escape(todo["content"])
     content_html = f"<s>{content}</s>" if is_done else content
     color_style = "color:gray;" if is_done else ""
@@ -638,7 +673,7 @@ def _render_todo_row(todo: dict) -> None:
                 st.rerun()
         with rc2:
             st.markdown(
-                f"<span style='{color_style}'>{badge} {content_html}</span>",
+                f"{priority_label}<span style='{color_style}'>{content_html}</span>",
                 unsafe_allow_html=True,
             )
             linked = " · 🔗 关联目标" if todo.get("linked_goal_id") else ""
