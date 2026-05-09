@@ -46,23 +46,26 @@
 ### Session CRUD
 
 #### `load_db() -> list[dict]`
-- **返回**：所有未软删除 session（按 `upload_time DESC`），每条含 `files / tags / group_ids / edit_history / comments`
+- **返回**：所有未软删除 session（按 `upload_time DESC`），每条含 `files / tags / group_ids / edit_history / comments`，以及结构化标签字段 `domains / attributes / topics / emotion_tags / emotion_note`
 - **副作用**：无
 
 #### `get_session(session_id: str) -> dict | None`
 - **返回**：单条 session 完整 dict，未找到返回 `None`
+- **结构化标签**：`domains / attributes / topics / emotion_tags` 返回 list；坏 JSON / 空值降级为 `[]`；`emotion_note` 空值降级为 `''`
 
-#### `create_session(session_id, file_entries, source_type, field_values, tags=None, status='pending', archive_time='') -> dict`
+#### `create_session(session_id, file_entries, source_type, field_values, tags=None, status='pending', archive_time='', domains=None, attributes=None, topics=None, emotion_tags=None, emotion_note='') -> dict`
 - **副作用**：插入 `sessions` + `session_files` + `session_tags`；自动计算 `is_complete`
+- **结构化标签**：新增可选参数均保持旧调用兼容；列表字段写库前 JSON 序列化，`None` 等同 `[]`
 - **返回**：完整 session dict
 - **异常**：违反 NOT NULL 约束时抛 `sqlite3.IntegrityError`
 
 #### `update_session_fields(session_id, new_values: dict) -> None`
-- **入参**：`new_values` 可含 `FIELD_SCHEMA` 字段 + 可选 `tags` / `group_ids`
+- **入参**：`new_values` 可含 `FIELD_SCHEMA` 字段 + 可选 `tags` / `group_ids` / `domains` / `attributes` / `topics` / `emotion_tags` / `emotion_note`
 - **副作用**：
   - Final 记录额外写 `edit_history`（仅业务字段，标签/分组不计）
   - Final 记录会**重写 `.md`** 并**重新 embed**（隐式调 `file_io._write_md` + `vector_db.embed_session`）
 - **不变量**：纯文字 session 跳过 `description` 的 diff（避免误记历史）
+- **结构化标签**：列表字段写库前 JSON 序列化；未传入的结构化标签字段保持原值
 
 #### `update_session_tags(session_id, tags: list[str]) -> None`
 - **副作用**：替换 `session_tags`；Final 记录会重新 embed（**不**写 `.md`，**不**记历史）
@@ -113,6 +116,12 @@
 - `get_tags_registry() -> list[str]` ：按 name 升序
 - `add_tag(name: str) -> None` ：`INSERT OR IGNORE`，空字符串忽略
 - `remove_tag(name: str) -> None` ：默认标签也能删（保护逻辑在 UI 层）
+
+### Label Registry
+
+- `get_label_registry(type: str) -> list[dict]`：返回指定类型标签，每条含 `name/is_system`，按 `is_system DESC, name ASC` 排序
+- `add_label(name: str, type: str) -> None`：`INSERT OR IGNORE` 写入用户自定义标签（`is_system=0`）；空名称静默忽略
+- `remove_label(name: str, type: str) -> None`：删除指定 `(name,type)`；不存在静默 no-op；系统标签保护在 UI 层处理
 
 ### Groups
 
@@ -171,6 +180,23 @@
 
 #### `delete_annual_goal(goal_id: str) -> None`
 - **副作用**：删除年度目标；关联的 `calendar_todos.linked_goal_id` 自动置空
+
+### Session ↔ Annual Goal Links
+
+#### `link_session_to_goal(session_id: str, goal_id: str, reasoning: str = '') -> None`
+- **副作用**：向 `session_linked_goals` 插入关联；已存在时静默 no-op（`INSERT OR IGNORE`）
+- **不变量**：不触发 embedding，不重写 `.md`
+
+#### `unlink_session_from_goal(session_id: str, goal_id: str) -> None`
+- **副作用**：删除指定关联；不存在时静默 no-op
+
+#### `get_linked_goals_for_session(session_id: str) -> list[dict]`
+- **返回**：该 session 关联的年度目标完整 dict（JOIN `annual_goals`），额外含 `ai_reasoning`，按 `deadline ASC` 排序
+- **副作用**：无
+
+#### `get_linked_sessions_for_goal(goal_id: str) -> list[dict]`
+- **返回**：`[{"session_id": ..., "ai_reasoning": ...}]`
+- **副作用**：无
 
 ### Calendar Todos
 

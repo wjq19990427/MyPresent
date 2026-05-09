@@ -371,12 +371,39 @@ def _row_to_dict(row: sqlite3.Row, aux: tuple) -> dict:
         "archive_time": row["archive_time"]  or "",
         "deleted_at":   row["deleted_at"]    or "",
         "pre_delete_status": row["pre_delete_status"] or "",
+        "domains":      _json_list(row["domains"]),
+        "attributes":   _json_list(row["attributes"]),
+        "topics":       _json_list(row["topics"]),
+        "emotion_tags": _json_list(row["emotion_tags"]),
+        "emotion_note": row["emotion_note"] or "",
         "files":        files,
         "tags":         tags,
         "group_ids":    group_ids,
         "edit_history": history,
         "comments":     comments,
     }
+
+
+def _json_list(value) -> list:
+    if value is None or value == "":
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _json_dump_list(value) -> str:
+    if value is None:
+        items = []
+    elif isinstance(value, list):
+        items = value
+    elif isinstance(value, (tuple, set)):
+        items = list(value)
+    else:
+        items = []
+    return json.dumps(items, ensure_ascii=False)
 
 
 # ─── Session CRUD ─────────────────────────────────────────────────────────────
@@ -409,6 +436,11 @@ def create_session(
     tags: list[str] | None = None,
     status: str = "pending",
     archive_time: str = "",
+    domains: list[str] | None = None,
+    attributes: list[str] | None = None,
+    topics: list[str] | None = None,
+    emotion_tags: list[str] | None = None,
+    emotion_note: str = "",
 ) -> dict:
     """插入新 session，返回 session dict。"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -419,8 +451,9 @@ def create_session(
         conn.execute(
             """INSERT INTO sessions
                (id, status, source_type, content_time, description,
-                feeling, reason, is_complete, upload_time, archive_time)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                feeling, reason, is_complete, upload_time, archive_time,
+                domains, attributes, topics, emotion_tags, emotion_note)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 session_id, status, source_type,
                 fields.get("content_time", ""),
@@ -428,6 +461,11 @@ def create_session(
                 fields.get("feeling", ""),
                 fields.get("reason", ""),
                 is_complete, now, archive_time,
+                _json_dump_list(domains),
+                _json_dump_list(attributes),
+                _json_dump_list(topics),
+                _json_dump_list(emotion_tags),
+                emotion_note.strip(),
             ),
         )
         for fe in file_entries:
@@ -458,8 +496,36 @@ def update_session_fields(session_id: str, new_values: dict) -> None:
 
     new_tags   = new_values.get("tags")
     new_groups = new_values.get("group_ids")
+    domains = (
+        _json_dump_list(new_values["domains"])
+        if "domains" in new_values
+        else _json_dump_list(session.get("domains", []))
+    )
+    attributes = (
+        _json_dump_list(new_values["attributes"])
+        if "attributes" in new_values
+        else _json_dump_list(session.get("attributes", []))
+    )
+    topics = (
+        _json_dump_list(new_values["topics"])
+        if "topics" in new_values
+        else _json_dump_list(session.get("topics", []))
+    )
+    emotion_tags = (
+        _json_dump_list(new_values["emotion_tags"])
+        if "emotion_tags" in new_values
+        else _json_dump_list(session.get("emotion_tags", []))
+    )
+    emotion_note = (
+        str(new_values.get("emotion_note", "")).strip()
+        if "emotion_note" in new_values
+        else session.get("emotion_note", "")
+    )
 
-    fields = {f["key"]: str(new_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
+    fields = {
+        f["key"]: str(new_values.get(f["key"], session.get(f["key"], ""))).strip()
+        for f in FIELD_SCHEMA
+    }
     is_complete = int(not _missing_fields(fields))
 
     with _conn() as conn:
@@ -486,7 +552,8 @@ def update_session_fields(session_id: str, new_values: dict) -> None:
 
         conn.execute(
             """UPDATE sessions SET
-               content_time=?, description=?, feeling=?, reason=?, is_complete=?
+               content_time=?, description=?, feeling=?, reason=?, is_complete=?,
+               domains=?, attributes=?, topics=?, emotion_tags=?, emotion_note=?
                WHERE id=?""",
             (
                 fields.get("content_time", ""),
@@ -494,6 +561,11 @@ def update_session_fields(session_id: str, new_values: dict) -> None:
                 fields.get("feeling", ""),
                 fields.get("reason", ""),
                 is_complete,
+                domains,
+                attributes,
+                topics,
+                emotion_tags,
+                emotion_note,
                 session_id,
             ),
         )
@@ -645,6 +717,37 @@ def add_tag(tag: str) -> None:
 def remove_tag(tag: str) -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM tags_registry WHERE name=?", (tag,))
+
+
+# ─── Label Registry ──────────────────────────────────────────────────────────
+
+def get_label_registry(type: str) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT name,is_system FROM label_registry WHERE type=? "
+            "ORDER BY is_system DESC, name ASC",
+            (type,),
+        ).fetchall()
+    return [{"name": r["name"], "is_system": bool(r["is_system"])} for r in rows]
+
+
+def add_label(name: str, type: str) -> None:
+    name = name.strip()
+    if not name:
+        return
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO label_registry(name,type,is_system) VALUES (?,?,0)",
+            (name, type),
+        )
+
+
+def remove_label(name: str, type: str) -> None:
+    with _conn() as conn:
+        conn.execute(
+            "DELETE FROM label_registry WHERE name=? AND type=?",
+            (name, type),
+        )
 
 
 # ─── Groups ───────────────────────────────────────────────────────────────────
@@ -1145,3 +1248,50 @@ def delete_goal_category(name: str) -> None:
             "DELETE FROM goal_categories WHERE name=? AND is_system=0",
             (name,),
         )
+
+
+def link_session_to_goal(
+    session_id: str, goal_id: str, reasoning: str = ""
+) -> None:
+    link_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with _conn() as conn:
+        conn.execute(
+            """INSERT OR IGNORE INTO session_linked_goals
+               (id,session_id,goal_id,ai_reasoning,created_at)
+               VALUES(?,?,?,?,?)""",
+            (link_id, session_id, goal_id, reasoning, now),
+        )
+
+
+def unlink_session_from_goal(session_id: str, goal_id: str) -> None:
+    with _conn() as conn:
+        conn.execute(
+            "DELETE FROM session_linked_goals WHERE session_id=? AND goal_id=?",
+            (session_id, goal_id),
+        )
+
+
+def get_linked_goals_for_session(session_id: str) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT g.*, l.ai_reasoning
+               FROM session_linked_goals l
+               JOIN annual_goals g ON g.id = l.goal_id
+               WHERE l.session_id=?
+               ORDER BY g.deadline ASC""",
+            (session_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_linked_sessions_for_goal(goal_id: str) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """SELECT session_id, ai_reasoning
+               FROM session_linked_goals
+               WHERE goal_id=?
+               ORDER BY created_at ASC""",
+            (goal_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
