@@ -294,6 +294,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **功能**：月份导航、周一到周日的方格月历、日期选择、日期内待办摘要、选中日期或整月待办列表、新增待办入口
 - **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding`
 - **视觉约定**：星期标题与日期格共用同一列规格；日期格展示日期数字与最多 3 条待办摘要，超出显示 `+N 更多`；今日和选中日期有不同高亮
+- **交互约定**：选中具体日期后新增待办默认填入该日期；日期视图提供返回月份视图入口，清空 `planning_cal_date`
 - **注意**：重复规则只存储和展示，不在 UI 层自动生成实例
 
 #### `_render_month_nav(year: int, month: int) -> None`

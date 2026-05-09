@@ -297,9 +297,28 @@ def _render_calendar_todos() -> None:
         st.markdown(f"#### 📋 {year} 年 {month} 月全部待办")
         display_todos = todos
 
-    if st.button("➕ 新增待办", key="add_todo_btn", type="primary"):
-        st.session_state["planning_todo_adding"] = True
-        st.rerun()
+    action_cols = st.columns([1, 1.4, 3.6] if selected_date else [1, 5])
+    with action_cols[0]:
+        if st.button(
+            "➕ 新增待办",
+            key="add_todo_btn",
+            type="primary",
+            use_container_width=True,
+        ):
+            _reset_todo_form_date()
+            st.session_state["planning_todo_adding"] = True
+            st.rerun()
+    if selected_date:
+        with action_cols[1]:
+            if st.button(
+                "返回月份视图",
+                key="back_to_month_btn",
+                use_container_width=True,
+            ):
+                st.session_state["planning_cal_date"] = None
+                st.session_state["planning_todo_adding"] = False
+                _reset_todo_form_date()
+                st.rerun()
 
     _render_todo_form(selected_date, year, month)
 
@@ -355,7 +374,12 @@ def _set_calendar_month(year: int, month: int) -> None:
     st.session_state["planning_cal_year"] = year
     st.session_state["planning_cal_month"] = month
     st.session_state["planning_cal_date"] = None
+    _reset_todo_form_date()
     st.rerun()
+
+
+def _reset_todo_form_date() -> None:
+    st.session_state.pop("tf_date", None)
 
 
 def _render_calendar_cell(
@@ -384,6 +408,7 @@ def _render_calendar_cell(
         help=f"选择 {d_str}",
     ):
         st.session_state["planning_cal_date"] = d_str
+        _reset_todo_form_date()
         st.rerun()
 
 
