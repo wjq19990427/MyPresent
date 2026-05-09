@@ -278,10 +278,18 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 ### 月度日历待办子页
 
 #### `_render_calendar_todos() -> None`
-- **功能**：月份前后导航、周一到周日的月历网格、日期选择、日期优先级徽标、选中日期或整月待办列表、新增待办入口
+- **功能**：月份导航、周一到周日的方格月历、日期选择、日期内待办摘要、选中日期或整月待办列表、新增待办入口
 - **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding`
-- **视觉约定**：有待办的日期最多显示 3 个优先级徽标，超出显示 `+n`；今天日期按钮加粗，选中日期用 primary 按钮
+- **视觉约定**：星期标题与日期格共用同一列规格；日期格展示日期数字与最多 3 条待办摘要，超出显示 `+N 更多`；今日和选中日期有不同高亮
 - **注意**：重复规则只存储和展示，不在 UI 层自动生成实例
+
+#### `_render_month_nav(year: int, month: int) -> None`
+- **功能**：渲染月份导航，支持 `◀` / `▶` 逐月翻页，也支持年份与月份直接跳转
+- **副作用**：任意月份变更写 `planning_cal_year` / `planning_cal_month`，清空 `planning_cal_date` 后 `st.rerun()`
+
+#### `_render_calendar_cell(year, month, day_num, selected_date, day_map) -> None`
+- **功能**：渲染单个方格日期块；空白日期渲染等高占位；有效日期提供选择按钮
+- **视觉约定**：已完成待办摘要使用删除线；日期格与星期标题保持列对齐
 
 #### `_render_todo_form(selected_date: str | None, year: int, month: int) -> None`
 - **渲染条件**：仅当 `planning_todo_adding=True` 时显示
@@ -290,9 +298,10 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **副作用**：保存时调用 `create_calendar_todo()`；取消/保存后关闭表单
 
 #### `_render_todo_row(todo: dict) -> None`
-- **功能**：单条待办展示、完成 checkbox、删除、完成复盘、已完成心得展示
+- **功能**：单条待办展示、完成 checkbox、延期、删除、完成复盘、已完成心得展示
 - **完成流程**：勾选未完成待办时打开复盘输入；确认或跳过后调用 `complete_todo()`；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
-- **依赖 session_state**：`_reflection_open`，结构为 `{todo_id: True}`
+- **延期流程**：仅未完成待办显示「延期」入口；展开内联表单后确认调用 `postpone_todo()`；`postpone_count > 0` 时信息行显示延期次数
+- **依赖 session_state**：`_reflection_open` / `_postpone_open`，结构均为 `{todo_id: True}`
 
 ---
 

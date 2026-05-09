@@ -50,6 +50,7 @@ def init_state() -> None:
         "planning_cal_date":      None,
         "planning_todo_adding":   False,
         "_reflection_open":       {},
+        "_postpone_open":         {},
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v
