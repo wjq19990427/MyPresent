@@ -462,7 +462,7 @@
 
 ### 当前管理的键（按域分组）
 
-- **导航**：`active_top_nav` / `_nav_target`
+- **导航**：`active_tab` / `active_sub_tab` / `_nav_target`
 - **选择状态**：`pending_selected` / `archived_selected` / `search_selected`
 - **搜索**：`semantic_results` / `semantic_query_used` / `date_filter_exact` / `_fuzzy` / `_range` / `_search_mode_prev`
 - **已归档过滤**：`archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`
@@ -482,6 +482,13 @@
 - `_xxx`（下划线开头）= 内部状态，不在 UI 直接展示
 - 业务相关键不要前缀下划线
 - 添加新键时同步在 `init_state()` 登记，避免散落
+
+### 导航协议
+
+- `active_tab`：当前激活外层 Tab，默认 `"🏠 主页"`
+- `active_sub_tab`：各外层 Tab 的内层激活 sub-tab 字典，默认 `{}`
+- `_nav_target`：编程跳转指令，格式为 `(外层Tab名, 子Tab名或 None)`；`app.py` 在渲染导航前消费并置 `None`
+- 组件可通过 `st.session_state["_nav_target"] = ("📝 记录台", "⬆️ 上传"); st.rerun()` 跳转到指定页面
 
 ## constants.py
 
