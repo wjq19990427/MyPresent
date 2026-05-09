@@ -3,7 +3,7 @@
 > `data/database.db` · WAL 模式 · `PRAGMA foreign_keys=ON`
 > Schema 单一信息源：`core/db_manager.py::_SCHEMA`
 
-## 表清单（实际 14 张）
+## 表清单（实际 15 张）
 
 | # | 表 | 主键 | 职责 | 契约状态 |
 |---|----|------|------|----------|
@@ -21,6 +21,7 @@
 | 12 | `operation_logs` | autoinc | session 操作审计日志 | ✅ |
 | 13 | `annual_goals` | `id` (TEXT) | 年度规划目标 | ✅ |
 | 14 | `calendar_todos` | `id` (TEXT) | 日历待办 | ✅ |
+| 15 | `goal_categories` | `name` (TEXT) | 年度规划分类注册表 | ✅ |
 
 ---
 
@@ -179,7 +180,18 @@
 | `recurrence` | TEXT | NOT NULL, default `'仅一次'` |
 | `linked_goal_id` | TEXT | **FK → annual_goals(id) ON DELETE SET NULL**，可空 |
 | `reflection` | TEXT | NOT NULL, default `''` |
+| `postpone_count` | INTEGER | NOT NULL, default `0` |
+| `postponed_days` | INTEGER | NOT NULL, default `0` |
 | `created_at` | TEXT | NOT NULL, default `strftime('%Y-%m-%d %H:%M:%S','now','localtime')` |
+
+### 15. goal_categories
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| `name` | TEXT | **PK** |
+| `is_system` | INTEGER | NOT NULL, default `0` |
+
+`init_db()` 启动时用 `INSERT OR IGNORE` 预填四条系统默认分类：`身心健康` / `亲密关系` / `事业发展` / `个人成长`，且 `is_system=1`。
 
 ---
 

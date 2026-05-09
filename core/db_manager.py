@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Generator
 
@@ -134,7 +134,14 @@ CREATE TABLE IF NOT EXISTS calendar_todos (
     recurrence      TEXT NOT NULL DEFAULT '仅一次',
     linked_goal_id  TEXT REFERENCES annual_goals(id) ON DELETE SET NULL,
     reflection      TEXT NOT NULL DEFAULT '',
+    postpone_count  INTEGER NOT NULL DEFAULT 0,
+    postponed_days  INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS goal_categories (
+    name       TEXT PRIMARY KEY,
+    is_system  INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -148,10 +155,26 @@ def init_db() -> None:
             conn.execute("ALTER TABLE sessions ADD COLUMN deleted_at TEXT")
         if "pre_delete_status" not in _cols:
             conn.execute("ALTER TABLE sessions ADD COLUMN pre_delete_status TEXT")
+        _todo_cols = {r[1] for r in conn.execute("PRAGMA table_info(calendar_todos)")}
+        if "postpone_count" not in _todo_cols:
+            conn.execute(
+                "ALTER TABLE calendar_todos "
+                "ADD COLUMN postpone_count INTEGER NOT NULL DEFAULT 0"
+            )
+        if "postponed_days" not in _todo_cols:
+            conn.execute(
+                "ALTER TABLE calendar_todos "
+                "ADD COLUMN postponed_days INTEGER NOT NULL DEFAULT 0"
+            )
         # 初始化默认标签
         for tag in DEFAULT_TAGS:
             conn.execute(
                 "INSERT OR IGNORE INTO tags_registry(name) VALUES (?)", (tag,)
+            )
+        for category in _SYSTEM_GOAL_CATEGORIES:
+            conn.execute(
+                "INSERT OR IGNORE INTO goal_categories(name,is_system) VALUES (?,1)",
+                (category,),
             )
 
 
@@ -766,7 +789,8 @@ def purge_expired_deleted(days: int = 30) -> int:
     return len(ids)
 
 
-GOAL_CATEGORIES = ["身心健康", "亲密关系", "事业发展", "个人成长", "自定义"]
+_SYSTEM_GOAL_CATEGORIES = ["身心健康", "亲密关系", "事业发展", "个人成长"]
+GOAL_CATEGORIES = _SYSTEM_GOAL_CATEGORIES
 GOAL_STATUSES = ["未开始", "进行中", "已完成", "已搁置"]
 GOAL_PRIORITIES = ["高", "中", "低"]
 
@@ -893,6 +917,28 @@ def complete_todo(todo_id: str, reflection: str = "") -> None:
         )
 
 
+def postpone_todo(todo_id: str, days: int) -> None:
+    if days <= 0:
+        return
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT target_date FROM calendar_todos WHERE id=?", (todo_id,)
+        ).fetchone()
+        if not row:
+            return
+        new_date = (
+            datetime.strptime(row["target_date"], "%Y-%m-%d").date()
+            + timedelta(days=days)
+        )
+        conn.execute(
+            """UPDATE calendar_todos
+               SET target_date=?, postpone_count=postpone_count+1,
+                   postponed_days=postponed_days+?
+               WHERE id=?""",
+            (str(new_date), days, todo_id),
+        )
+
+
 def update_calendar_todo(todo_id: str, **fields) -> None:
     allowed = {
         "content",
@@ -918,3 +964,34 @@ def update_calendar_todo(todo_id: str, **fields) -> None:
 def delete_calendar_todo(todo_id: str) -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM calendar_todos WHERE id=?", (todo_id,))
+
+
+def get_goal_categories() -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT name,is_system FROM goal_categories "
+            "ORDER BY is_system DESC, name ASC"
+        ).fetchall()
+    return [{"name": r["name"], "is_system": bool(r["is_system"])} for r in rows]
+
+
+def add_goal_category(name: str) -> None:
+    name = name.strip()
+    if not name:
+        return
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO goal_categories(name,is_system) VALUES (?,0)",
+            (name,),
+        )
+
+
+def delete_goal_category(name: str) -> None:
+    name = name.strip()
+    if not name:
+        return
+    with _conn() as conn:
+        conn.execute(
+            "DELETE FROM goal_categories WHERE name=? AND is_system=0",
+            (name,),
+        )
