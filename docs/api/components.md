@@ -269,7 +269,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **功能**：状态/分类筛选、分类管理、新增目标、目标列表展示、状态即时更新、编辑、删除
 - **分类来源**：运行时调用 `get_goal_categories()`，筛选器与表单下拉框均使用 DB 中实际分类
 - **依赖 session_state**：`planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_goal_editing` / `planning_cat_manager_open`
-- **视觉约定**：优先级徽标 `高=🔴 高`、`中=🟡 中`、`低=🟢 低`；`已完成` / `已搁置` 目标使用删除线
+- **视觉约定**：优先级以小号边框标签展示，文案为 `优先级：高/中/低`；`已完成` / `已搁置` 目标使用删除线
 
 #### `_render_goal_row(goal: dict) -> None`
 - **功能**：渲染单条年度目标；有关联待办时额外显示整体进度（已完成数 / 总数 + 进度条），并提供只读展开区查看关联待办
