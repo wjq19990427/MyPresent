@@ -139,7 +139,8 @@
 
 | 常量 | 值 |
 |------|----|
-| `GOAL_CATEGORIES` | `["身心健康", "亲密关系", "事业发展", "个人成长", "自定义"]` |
+| `_SYSTEM_GOAL_CATEGORIES` | `["身心健康", "亲密关系", "事业发展", "个人成长"]` |
+| `GOAL_CATEGORIES` | 兼容导出，指向 `_SYSTEM_GOAL_CATEGORIES`；已过时，UI 分类来源应改用 `get_goal_categories()` |
 | `GOAL_STATUSES` | `["未开始", "进行中", "已完成", "已搁置"]` |
 | `GOAL_PRIORITIES` | `["高", "中", "低"]` |
 | `TODO_CATEGORIES` | `["工作", "学习", "生活", "社交", "娱乐"]` |
@@ -179,12 +180,31 @@
 
 #### `complete_todo(todo_id: str, reflection: str = "") -> None`
 - **副作用**：将待办状态改为 `已完成`，并写入复盘心得
+- **不变量**：不修改延期字段
 
 #### `update_calendar_todo(todo_id: str, **fields) -> None`
 - **副作用**：更新 `content/category/priority/target_date/status/recurrence/linked_goal_id/reflection`；其他字段静默忽略；空更新直接返回
 
 #### `delete_calendar_todo(todo_id: str) -> None`
 - **副作用**：删除待办
+
+#### `postpone_todo(todo_id: str, days: int) -> None`
+- **副作用**：将 `target_date` 推迟 `days` 天，`postpone_count += 1`，`postponed_days += days`
+- **约束**：`days <= 0` 时静默 no-op；未找到待办时静默 no-op；不修改 `status` / `reflection`
+
+### Goal Categories
+
+#### `get_goal_categories() -> list[dict]`
+- **返回**：所有年度规划分类，每条含 `name` 与 `is_system`，按 `is_system DESC, name ASC` 排序
+- **用途**：UI 层获取年度规划分类的唯一推荐来源
+
+#### `add_goal_category(name: str) -> None`
+- **副作用**：插入用户自定义分类（`is_system=0`）
+- **约束**：`name.strip()` 为空或已存在时静默 no-op
+
+#### `delete_goal_category(name: str) -> None`
+- **副作用**：删除用户自定义分类
+- **约束**：系统分类（`is_system=1`）静默 no-op；不修改已有 `annual_goals.category` 历史值
 
 ### 不变量
 
