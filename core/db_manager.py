@@ -12,7 +12,17 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Generator
 
-from .constants import DB_PATH, FIELD_SCHEMA, REQUIRED_KEYS, DEFAULT_TAGS, TEXT_EXTS
+from .constants import (
+    ATTRIBUTES,
+    DB_PATH,
+    DEFAULT_TAGS,
+    DOMAINS,
+    EMOTIONS,
+    FIELD_SCHEMA,
+    REQUIRED_KEYS,
+    TEXT_EXTS,
+    TOPICS,
+)
 
 # ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -51,6 +61,13 @@ CREATE TABLE IF NOT EXISTS session_tags (
 
 CREATE TABLE IF NOT EXISTS tags_registry (
     name TEXT PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS label_registry (
+    name      TEXT NOT NULL,
+    type      TEXT NOT NULL CHECK(type IN ('domain', 'attribute', 'topic', 'emotion')),
+    is_system INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (name, type)
 );
 
 CREATE TABLE IF NOT EXISTS groups (
@@ -152,6 +169,15 @@ CREATE TABLE IF NOT EXISTS goal_categories (
     name       TEXT PRIMARY KEY,
     is_system  INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS session_linked_goals (
+    id           TEXT PRIMARY KEY,
+    session_id   TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    goal_id      TEXT NOT NULL REFERENCES annual_goals(id) ON DELETE CASCADE,
+    ai_reasoning TEXT DEFAULT '',
+    created_at   TEXT NOT NULL,
+    UNIQUE(session_id, goal_id)
+);
 """
 
 
@@ -164,6 +190,11 @@ def init_db() -> None:
             conn.execute("ALTER TABLE sessions ADD COLUMN deleted_at TEXT")
         if "pre_delete_status" not in _cols:
             conn.execute("ALTER TABLE sessions ADD COLUMN pre_delete_status TEXT")
+        _add_column_if_missing(conn, "sessions", "domains", "TEXT DEFAULT '[]'")
+        _add_column_if_missing(conn, "sessions", "attributes", "TEXT DEFAULT '[]'")
+        _add_column_if_missing(conn, "sessions", "topics", "TEXT DEFAULT '[]'")
+        _add_column_if_missing(conn, "sessions", "emotion_tags", "TEXT DEFAULT '[]'")
+        _add_column_if_missing(conn, "sessions", "emotion_note", "TEXT DEFAULT ''")
         _todo_cols = {r[1] for r in conn.execute("PRAGMA table_info(calendar_todos)")}
         if "postpone_count" not in _todo_cols:
             conn.execute(
@@ -185,6 +216,73 @@ def init_db() -> None:
                 "INSERT OR IGNORE INTO goal_categories(name,is_system) VALUES (?,1)",
                 (category,),
             )
+        _seed_label_registry(conn)
+    migrate_tags_to_topics()
+
+
+def _add_column_if_missing(
+    conn: sqlite3.Connection, table: str, column: str, definition: str
+) -> None:
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+
+
+def _seed_label_registry(conn: sqlite3.Connection) -> None:
+    seeds = [
+        ("domain", DOMAINS),
+        ("attribute", ATTRIBUTES),
+        ("topic", TOPICS),
+        ("emotion", EMOTIONS),
+    ]
+    for label_type, names in seeds:
+        for name in names:
+            conn.execute(
+                "INSERT OR IGNORE INTO label_registry(name,type,is_system) "
+                "VALUES (?,?,1)",
+                (name, label_type),
+            )
+
+
+def migrate_tags_to_topics() -> int:
+    updated = 0
+    with _conn() as conn:
+        table = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'"
+        ).fetchone()
+        if not table:
+            return 0
+        _add_column_if_missing(conn, "sessions", "domains", "TEXT DEFAULT '[]'")
+        _add_column_if_missing(conn, "sessions", "attributes", "TEXT DEFAULT '[]'")
+        _add_column_if_missing(conn, "sessions", "topics", "TEXT DEFAULT '[]'")
+        _add_column_if_missing(conn, "sessions", "emotion_tags", "TEXT DEFAULT '[]'")
+        _add_column_if_missing(conn, "sessions", "emotion_note", "TEXT DEFAULT ''")
+        rows = conn.execute(
+            "SELECT id, topics, domains FROM sessions "
+            "WHERE topics IS NULL OR topics='' OR topics='[]'"
+        ).fetchall()
+        for row in rows:
+            tags = [
+                r["tag"]
+                for r in conn.execute(
+                    "SELECT tag FROM session_tags WHERE session_id=? ORDER BY tag",
+                    (row["id"],),
+                )
+            ]
+            topics = json.dumps(tags, ensure_ascii=False)
+            domains = row["domains"] or ""
+            if domains == "" or domains == "[]":
+                domains = json.dumps(["未分类"], ensure_ascii=False)
+            if (row["topics"] or "") == topics and (row["domains"] or "") == domains:
+                continue
+            conn.execute(
+                "UPDATE sessions SET topics=?, domains=? WHERE id=?",
+                (topics, domains, row["id"]),
+            )
+            updated += 1
+    return updated
 
 
 @contextmanager

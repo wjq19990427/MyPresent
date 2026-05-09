@@ -3,7 +3,7 @@
 > `data/database.db` · WAL 模式 · `PRAGMA foreign_keys=ON`
 > Schema 单一信息源：`core/db_manager.py::_SCHEMA`
 
-## 表清单（实际 16 张）
+## 表清单（实际 18 张）
 
 | # | 表 | 主键 | 职责 | 契约状态 |
 |---|----|------|------|----------|
@@ -23,6 +23,8 @@
 | 14 | `calendar_todos` | `id` (TEXT) | 日历待办 | ✅ |
 | 15 | `daily_activities` | `id` (TEXT) | 今日事务实录 | ✅ |
 | 16 | `goal_categories` | `name` (TEXT) | 年度规划分类注册表 | ✅ |
+| 17 | `label_registry` | (`name`, `type`) | L-A-T / 情绪标签注册表 | ✅ |
+| 18 | `session_linked_goals` | `id` (TEXT) | session ↔ 年度目标关联 | ✅ |
 
 ---
 
@@ -44,6 +46,11 @@
 | `archive_time` | TEXT | default `''` | 归档时刻；pending 为空 |
 | `deleted_at` | TEXT | 可空 | 软删除时刻 |
 | `pre_delete_status` | TEXT | 可空 | 软删除前状态，用于恢复 |
+| `domains` | TEXT | default `'[]'` | JSON 数组，领域标签 |
+| `attributes` | TEXT | default `'[]'` | JSON 数组，视角属性 |
+| `topics` | TEXT | default `'[]'` | JSON 数组，主题标签；由旧 `session_tags` 一次性迁移填充 |
+| `emotion_tags` | TEXT | default `'[]'` | JSON 数组，情绪标签 |
+| `emotion_note` | TEXT | default `''` | 情绪描述文本 |
 
 ### 2. session_files
 
@@ -205,13 +212,35 @@
 
 `init_db()` 启动时用 `INSERT OR IGNORE` 预填四条系统默认分类：`身心健康` / `亲密关系` / `事业发展` / `个人成长`，且 `is_system=1`。
 
+### 17. label_registry
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| `name` | TEXT | NOT NULL |
+| `type` | TEXT | NOT NULL, CHECK 取值：`domain` / `attribute` / `topic` / `emotion` |
+| `is_system` | INTEGER | NOT NULL, default `0` |
+| **PK** | — | (`name`, `type`) |
+
+`init_db()` 启动时把 `DOMAINS` / `ATTRIBUTES` / `TOPICS` / `EMOTIONS` 四组常量用 `INSERT OR IGNORE` 灌入，系统种子 `is_system=1`。
+
+### 18. session_linked_goals
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| `id` | TEXT | **PK**（`YYYYMMDD_HHMMSS_ffffff`） |
+| `session_id` | TEXT | NOT NULL, **FK → sessions(id) ON DELETE CASCADE** |
+| `goal_id` | TEXT | NOT NULL, **FK → annual_goals(id) ON DELETE CASCADE** |
+| `ai_reasoning` | TEXT | default `''` |
+| `created_at` | TEXT | NOT NULL |
+| **UNIQUE** | — | (`session_id`, `goal_id`) |
+
 ---
 
 ## 跨表不变量
 
-- 删除 `sessions` 行 → 级联删除 `session_files` / `session_tags` / `session_groups` / `edit_history` / `comments`
+- 删除 `sessions` 行 → 级联删除 `session_files` / `session_tags` / `session_groups` / `edit_history` / `comments` / `session_linked_goals`
 - 删除 `groups` 行 → 级联删除 `session_groups`（`update_session_fields` 调用方仍需自行清理 UI 选择状态）
 - 删除 `llm_providers` 行 → 级联删除 `llm_models`，但 `llm_logs` 保留
-- 删除 `annual_goals` 行 → `calendar_todos.linked_goal_id` 置空，待办本身保留
+- 删除 `annual_goals` 行 → 级联删除 `session_linked_goals`；`calendar_todos.linked_goal_id` 置空，待办本身保留
 - 软删除 session 只改 `sessions.status/deleted_at/pre_delete_status`，不触发级联删除；永久删除才触发级联
 - 所有事务通过 `_conn()` 上下文管理器，异常自动 rollback
