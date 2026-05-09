@@ -3,7 +3,7 @@
 > `data/database.db` · WAL 模式 · `PRAGMA foreign_keys=ON`
 > Schema 单一信息源：`core/db_manager.py::_SCHEMA`
 
-## 表清单（实际 15 张）
+## 表清单（实际 16 张）
 
 | # | 表 | 主键 | 职责 | 契约状态 |
 |---|----|------|------|----------|
@@ -21,7 +21,8 @@
 | 12 | `operation_logs` | autoinc | session 操作审计日志 | ✅ |
 | 13 | `annual_goals` | `id` (TEXT) | 年度规划目标 | ✅ |
 | 14 | `calendar_todos` | `id` (TEXT) | 日历待办 | ✅ |
-| 15 | `goal_categories` | `name` (TEXT) | 年度规划分类注册表 | ✅ |
+| 15 | `daily_activities` | `id` (TEXT) | 今日事务实录 | ✅ |
+| 16 | `goal_categories` | `name` (TEXT) | 年度规划分类注册表 | ✅ |
 
 ---
 
@@ -184,7 +185,18 @@
 | `postponed_days` | INTEGER | NOT NULL, default `0` |
 | `created_at` | TEXT | NOT NULL, default `strftime('%Y-%m-%d %H:%M:%S','now','localtime')` |
 
-### 15. goal_categories
+### 15. daily_activities
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| `id` | TEXT | **PK**（`YYYYMMDD_HHMMSS_ffffff`） |
+| `date` | TEXT | NOT NULL（`YYYY-MM-DD`） |
+| `description` | TEXT | NOT NULL |
+| `category` | TEXT | NOT NULL（取值与 `TODO_CATEGORIES` 一致，无 FK） |
+| `duration` | INTEGER | NOT NULL, default `0`，单位分钟；0 表示未填写 |
+| `created_at` | TEXT | NOT NULL, default `strftime('%Y-%m-%d %H:%M:%S','now','localtime')` |
+
+### 16. goal_categories
 
 | 字段 | 类型 | 约束 |
 |------|------|------|

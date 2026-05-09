@@ -139,6 +139,15 @@ CREATE TABLE IF NOT EXISTS calendar_todos (
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS daily_activities (
+    id           TEXT PRIMARY KEY,
+    date         TEXT NOT NULL,
+    description  TEXT NOT NULL,
+    category     TEXT NOT NULL,
+    duration     INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS goal_categories (
     name       TEXT PRIMARY KEY,
     is_system  INTEGER NOT NULL DEFAULT 0
@@ -974,6 +983,39 @@ def update_calendar_todo(todo_id: str, **fields) -> None:
 def delete_calendar_todo(todo_id: str) -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM calendar_todos WHERE id=?", (todo_id,))
+
+
+def create_daily_activity(
+    date: str,
+    description: str,
+    category: str,
+    duration: int = 0,
+) -> dict:
+    aid = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO daily_activities(id,date,description,category,duration)"
+            " VALUES(?,?,?,?,?)",
+            (aid, date, description, category, duration),
+        )
+        row = conn.execute(
+            "SELECT * FROM daily_activities WHERE id=?", (aid,)
+        ).fetchone()
+    return dict(row)
+
+
+def get_daily_activities(date: str) -> list[dict]:
+    with _conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM daily_activities WHERE date=? ORDER BY created_at ASC",
+            (date,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_daily_activity(activity_id: str) -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM daily_activities WHERE id=?", (activity_id,))
 
 
 def get_goal_categories() -> list[dict]:
