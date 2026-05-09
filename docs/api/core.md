@@ -197,6 +197,20 @@
 - **副作用**：将 `target_date` 推迟 `days` 天，`postpone_count += 1`，`postponed_days += days`
 - **约束**：`days <= 0` 时静默 no-op；未找到待办时静默 no-op；不修改 `status` / `reflection`
 
+### Daily Activities
+
+#### `create_daily_activity(date: str, description: str, category: str, duration: int = 0) -> dict`
+- **副作用**：插入 `daily_activities`；ID 使用 `datetime.now().strftime("%Y%m%d_%H%M%S_%f")`
+- **返回**：新建事务实录 dict，字段含 `id/date/description/category/duration/created_at`
+- **约束**：`category` 取值应与 `TODO_CATEGORIES` 一致；DB 层不做 FK 约束
+
+#### `get_daily_activities(date: str) -> list[dict]`
+- **返回**：指定日期的事务实录列表，按 `created_at ASC` 排序
+- **副作用**：无
+
+#### `delete_daily_activity(activity_id: str) -> None`
+- **副作用**：删除指定事务实录
+
 ### Goal Categories
 
 #### `get_goal_categories() -> list[dict]`
