@@ -131,13 +131,13 @@
 - `_pasted_filename(text) -> str`：粘贴模式自动生成文件名（首行前 20 字符 + `.txt`）
 - `_pick_folder_dialog() -> str`：调用 Windows 文件夹选择器，取消时返回空字符串
 - `_get_uploaded_filenames() -> set[str]`：从 `data/pending|final` 递归提取已落盘文件的原始文件名，用于扫描结果去重
-- `_render_folder_import()`：选择文件夹 → 递归扫描 → multiselect → 模式选择（独立 / 合并） → 导入
+- `_render_folder_import()`：选择文件夹 → 递归扫描 → multiselect → 模式选择（独立 / 合并） → 导入；文件夹导入不要求预选标签，导入后进入灵感墙再统一处理
 
 ### 强制约束
 
 - **标签必填**：归档 / 暂存前校验 `upload_tags` 非空
 - 归档前必校验 `validate_session`，缺必填字段拒绝放行（暂存时仅警告不阻断）
-- 文件夹模式 `field_values={}`——直接以空字段暂存到 pending
+- 文件夹模式 `field_values={}` 且不传默认标签——直接以空字段暂存到 pending
 
 ### 已知陷阱
 
@@ -173,7 +173,7 @@
   - `session`：已有记录 dict，必须含 `session_id`
   - `model_id`：当前选中的 LLM 模型 ID
   - `state_key`：调用方提供的状态命名空间，避免上传页与多个详情面板互相污染
-- **行为/返回**：与 `render_ai_analysis()` 相同，但底层调用 `AnalysisSkill.execute(session_id, ...)`
+- **行为/返回**：与 `render_ai_analysis()` 相同；底层调用 `AnalysisSkill.execute_draft(session, ...)`，使用调用方传入的当前 UI 草稿，避免待处理记录 DB 字段为空时二次查库导致「内容为空」
 - **约束**：不直接写 DB；调用方负责把采纳结果写回 UI widget 和 `update_session_fields()`
 
 ---

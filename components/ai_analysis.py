@@ -286,8 +286,8 @@ def _run_session_analysis(
     fields: str | list[str],
     hint: str,
 ):
-    return AnalysisSkill().execute(
-        session.get("session_id", ""),
+    return AnalysisSkill().execute_draft(
+        session,
         model_id,
         fields=fields,
         hint=hint,
