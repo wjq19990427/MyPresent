@@ -135,6 +135,57 @@
 #### `get_llm_logs(limit: int = 200) -> list[dict]`
 - **返回**：按 id 倒序，最新在前
 
+### Planning Constants
+
+| 常量 | 值 |
+|------|----|
+| `GOAL_CATEGORIES` | `["身心健康", "亲密关系", "事业发展", "个人成长", "自定义"]` |
+| `GOAL_STATUSES` | `["未开始", "进行中", "已完成", "已搁置"]` |
+| `GOAL_PRIORITIES` | `["高", "中", "低"]` |
+| `TODO_CATEGORIES` | `["工作", "学习", "生活", "社交", "娱乐"]` |
+| `TODO_RECURRENCES` | `["仅一次", "每天", "每周", "每月", "每年"]` |
+| `TODO_PRIORITIES` | `["高", "中", "低"]` |
+
+### Annual Goals
+
+#### `create_annual_goal(content: str, category: str, priority: str, deadline: str, status: str = "未开始") -> dict`
+- **副作用**：插入 `annual_goals`；ID 使用 `datetime.now().strftime("%Y%m%d_%H%M%S_%f")`
+- **返回**：新建目标 dict
+
+#### `get_annual_goals(status_filter: list[str] | None = None) -> list[dict]`
+- **返回**：年度目标列表，按 `deadline ASC` 排序；传 `status_filter` 时只返回指定状态
+
+#### `get_annual_goal(goal_id: str) -> dict | None`
+- **返回**：单条年度目标，未找到返回 `None`
+
+#### `update_annual_goal(goal_id: str, **fields) -> None`
+- **副作用**：更新 `content/category/priority/deadline/status`；其他字段静默忽略；空更新直接返回
+
+#### `delete_annual_goal(goal_id: str) -> None`
+- **副作用**：删除年度目标；关联的 `calendar_todos.linked_goal_id` 自动置空
+
+### Calendar Todos
+
+#### `create_calendar_todo(content: str, category: str, priority: str, target_date: str, recurrence: str = "仅一次", linked_goal_id: str | None = None) -> dict`
+- **副作用**：插入 `calendar_todos`；ID 使用 `datetime.now().strftime("%Y%m%d_%H%M%S_%f")`
+- **返回**：新建待办 dict
+
+#### `get_calendar_todos(year: int | None = None, month: int | None = None, status_filter: list[str] | None = None) -> list[dict]`
+- **返回**：待办列表，按 `target_date ASC` 排序；传 `year/month` 时返回目标月份记录以及 `recurrence != "仅一次"` 的记录；传 `status_filter` 时再按状态过滤
+- **注意**：重复任务本期只存储/展示，不自动生成新实例
+
+#### `get_calendar_todo(todo_id: str) -> dict | None`
+- **返回**：单条待办，未找到返回 `None`
+
+#### `complete_todo(todo_id: str, reflection: str = "") -> None`
+- **副作用**：将待办状态改为 `已完成`，并写入复盘心得
+
+#### `update_calendar_todo(todo_id: str, **fields) -> None`
+- **副作用**：更新 `content/category/priority/target_date/status/recurrence/linked_goal_id/reflection`；其他字段静默忽略；空更新直接返回
+
+#### `delete_calendar_todo(todo_id: str) -> None`
+- **副作用**：删除待办
+
 ### 不变量
 
 - 所有公开函数自管事务（`_conn()` 上下文）；异常自动 rollback

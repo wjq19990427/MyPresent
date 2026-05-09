@@ -113,6 +113,29 @@ CREATE TABLE IF NOT EXISTS operation_logs (
     operation    TEXT    NOT NULL,
     operated_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS annual_goals (
+    id          TEXT PRIMARY KEY,
+    content     TEXT NOT NULL,
+    category    TEXT NOT NULL,
+    priority    TEXT NOT NULL DEFAULT '中',
+    deadline    TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT '未开始',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS calendar_todos (
+    id              TEXT PRIMARY KEY,
+    content         TEXT NOT NULL,
+    category        TEXT NOT NULL,
+    priority        TEXT NOT NULL DEFAULT '中',
+    target_date     TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT '待办',
+    recurrence      TEXT NOT NULL DEFAULT '仅一次',
+    linked_goal_id  TEXT REFERENCES annual_goals(id) ON DELETE SET NULL,
+    reflection      TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
+);
 """
 
 
@@ -741,3 +764,157 @@ def purge_expired_deleted(days: int = 30) -> int:
         with _conn() as conn:
             conn.execute("DELETE FROM sessions WHERE id=?", (sid,))
     return len(ids)
+
+
+GOAL_CATEGORIES = ["身心健康", "亲密关系", "事业发展", "个人成长", "自定义"]
+GOAL_STATUSES = ["未开始", "进行中", "已完成", "已搁置"]
+GOAL_PRIORITIES = ["高", "中", "低"]
+
+TODO_CATEGORIES = ["工作", "学习", "生活", "社交", "娱乐"]
+TODO_RECURRENCES = ["仅一次", "每天", "每周", "每月", "每年"]
+TODO_PRIORITIES = ["高", "中", "低"]
+
+
+def create_annual_goal(
+    content: str,
+    category: str,
+    priority: str,
+    deadline: str,
+    status: str = "未开始",
+) -> dict:
+    gid = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO annual_goals(id,content,category,priority,deadline,status)"
+            " VALUES(?,?,?,?,?,?)",
+            (gid, content, category, priority, deadline, status),
+        )
+    return get_annual_goal(gid)
+
+
+def get_annual_goals(status_filter: list[str] | None = None) -> list[dict]:
+    with _conn() as conn:
+        if status_filter:
+            placeholders = ",".join("?" * len(status_filter))
+            rows = conn.execute(
+                f"SELECT * FROM annual_goals WHERE status IN ({placeholders})"
+                " ORDER BY deadline ASC",
+                status_filter,
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM annual_goals ORDER BY deadline ASC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_annual_goal(goal_id: str) -> dict | None:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM annual_goals WHERE id=?", (goal_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_annual_goal(goal_id: str, **fields) -> None:
+    allowed = {"content", "category", "priority", "deadline", "status"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return
+    set_clause = ", ".join(f"{k}=?" for k in updates)
+    with _conn() as conn:
+        conn.execute(
+            f"UPDATE annual_goals SET {set_clause} WHERE id=?",
+            (*updates.values(), goal_id),
+        )
+
+
+def delete_annual_goal(goal_id: str) -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM annual_goals WHERE id=?", (goal_id,))
+
+
+def create_calendar_todo(
+    content: str,
+    category: str,
+    priority: str,
+    target_date: str,
+    recurrence: str = "仅一次",
+    linked_goal_id: str | None = None,
+) -> dict:
+    tid = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    with _conn() as conn:
+        conn.execute(
+            "INSERT INTO calendar_todos"
+            "(id,content,category,priority,target_date,recurrence,linked_goal_id)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (tid, content, category, priority, target_date, recurrence, linked_goal_id),
+        )
+    return get_calendar_todo(tid)
+
+
+def get_calendar_todos(
+    year: int | None = None,
+    month: int | None = None,
+    status_filter: list[str] | None = None,
+) -> list[dict]:
+    with _conn() as conn:
+        if year and month:
+            month_prefix = f"{year:04d}-{month:02d}"
+            rows = conn.execute(
+                "SELECT * FROM calendar_todos"
+                " WHERE target_date LIKE ? OR recurrence != '仅一次'"
+                " ORDER BY target_date ASC",
+                (f"{month_prefix}%",),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM calendar_todos ORDER BY target_date ASC"
+            ).fetchall()
+    todos = [dict(r) for r in rows]
+    if status_filter:
+        todos = [t for t in todos if t["status"] in status_filter]
+    return todos
+
+
+def get_calendar_todo(todo_id: str) -> dict | None:
+    with _conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM calendar_todos WHERE id=?", (todo_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def complete_todo(todo_id: str, reflection: str = "") -> None:
+    with _conn() as conn:
+        conn.execute(
+            "UPDATE calendar_todos SET status='已完成', reflection=? WHERE id=?",
+            (reflection, todo_id),
+        )
+
+
+def update_calendar_todo(todo_id: str, **fields) -> None:
+    allowed = {
+        "content",
+        "category",
+        "priority",
+        "target_date",
+        "status",
+        "recurrence",
+        "linked_goal_id",
+        "reflection",
+    }
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return
+    set_clause = ", ".join(f"{k}=?" for k in updates)
+    with _conn() as conn:
+        conn.execute(
+            f"UPDATE calendar_todos SET {set_clause} WHERE id=?",
+            (*updates.values(), todo_id),
+        )
+
+
+def delete_calendar_todo(todo_id: str) -> None:
+    with _conn() as conn:
+        conn.execute("DELETE FROM calendar_todos WHERE id=?", (todo_id,))

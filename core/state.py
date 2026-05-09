@@ -1,6 +1,8 @@
 """Streamlit session state 初始化。"""
 from __future__ import annotations
 
+from datetime import datetime
+
 import streamlit as st
 
 
@@ -39,6 +41,15 @@ def init_state() -> None:
         "_draft_test_passed":    False,
         "_confirm_edit_pvd":     None,
         "_confirm_edit_mdl":     None,
+        "planning_sub_tab":       "annual",
+        "planning_goal_editing":  None,
+        "planning_goal_filter_status": [],
+        "planning_goal_filter_cat":    [],
+        "planning_cal_year":      datetime.now().year,
+        "planning_cal_month":     datetime.now().month,
+        "planning_cal_date":      None,
+        "planning_todo_adding":   False,
+        "_reflection_open":       {},
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v

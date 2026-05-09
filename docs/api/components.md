@@ -22,6 +22,7 @@
 | `ai_tagging.py` | AI 打标 UI 组件 | ✅ |
 | `ai_fill.py` | AI 感受/原因补全 UI 组件 | ✅ |
 | `tab_recycle.py` | 「回收站」Tab | ✅ |
+| `tab_planning.py` | 「规划控制台」Tab | ✅ |
 
 ---
 
@@ -251,6 +252,47 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 
 - 永久删除不可恢复，必须保留二次确认
 - 自动清理走 `purge_expired_deleted`；用户主动永久删除在 UI 内补充处理
+
+---
+
+## tab_planning.py
+
+> 「📋 规划控制台」Tab。包含「🎯 年度规划」与「📅 月度日历待办」两个子页。
+
+### `render_planning_tab() -> None`
+- **副作用**：渲染规划控制台两个子 Tab；年度规划调 `_render_annual_goals()`，日历待办调 `_render_calendar_todos()`
+- **依赖**：所有数据读写均通过 `core.db_manager` 的 `annual_goals` / `calendar_todos` CRUD 与枚举常量
+
+### 年度规划子页
+
+#### `_render_annual_goals() -> None`
+- **功能**：状态/分类筛选、新增目标、目标列表展示、状态即时更新、编辑、删除
+- **依赖 session_state**：`planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_goal_editing`
+- **视觉约定**：优先级徽标 `高=🔴`、`中=🟡`、`低=🟢`；`已完成` / `已搁置` 目标使用删除线
+
+#### `_render_goal_form(editing: str) -> None`
+- **入参**：`"NEW"` 表示新增；否则为 `annual_goals.id`
+- **功能**：编辑 `content/category/priority/deadline/status`；分类选择 `自定义` 时显示自定义维度输入框
+- **副作用**：保存时调用 `create_annual_goal()` 或 `update_annual_goal()`；取消/保存后清空 `planning_goal_editing`
+
+### 月度日历待办子页
+
+#### `_render_calendar_todos() -> None`
+- **功能**：月份前后导航、周一到周日的月历网格、日期选择、日期优先级徽标、选中日期或整月待办列表、新增待办入口
+- **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding`
+- **视觉约定**：有待办的日期最多显示 3 个优先级徽标，超出显示 `+n`；今天日期按钮加粗，选中日期用 primary 按钮
+- **注意**：重复规则只存储和展示，不在 UI 层自动生成实例
+
+#### `_render_todo_form(selected_date: str | None, year: int, month: int) -> None`
+- **渲染条件**：仅当 `planning_todo_adding=True` 时显示
+- **功能**：创建待办，字段包括 `content/category/priority/target_date/recurrence/linked_goal_id`
+- **关联目标**：下拉框只展示状态为 `未开始` / `进行中` 的年度目标
+- **副作用**：保存时调用 `create_calendar_todo()`；取消/保存后关闭表单
+
+#### `_render_todo_row(todo: dict) -> None`
+- **功能**：单条待办展示、完成 checkbox、删除、完成复盘、已完成心得展示
+- **完成流程**：勾选未完成待办时打开复盘输入；确认或跳过后调用 `complete_todo()`；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
+- **依赖 session_state**：`_reflection_open`，结构为 `{todo_id: True}`
 
 ---
 
