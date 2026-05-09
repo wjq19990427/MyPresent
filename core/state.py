@@ -43,6 +43,7 @@ def init_state() -> None:
         "_confirm_edit_mdl":     None,
         "planning_sub_tab":       "annual",
         "planning_goal_editing":  None,
+        "planning_cat_manager_open": False,
         "planning_goal_filter_status": [],
         "planning_goal_filter_cat":    [],
         "planning_cal_year":      datetime.now().year,

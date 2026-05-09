@@ -266,14 +266,21 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 ### 年度规划子页
 
 #### `_render_annual_goals() -> None`
-- **功能**：状态/分类筛选、新增目标、目标列表展示、状态即时更新、编辑、删除
-- **依赖 session_state**：`planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_goal_editing`
+- **功能**：状态/分类筛选、分类管理、新增目标、目标列表展示、状态即时更新、编辑、删除
+- **分类来源**：运行时调用 `get_goal_categories()`，筛选器与表单下拉框均使用 DB 中实际分类
+- **依赖 session_state**：`planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_goal_editing` / `planning_cat_manager_open`
 - **视觉约定**：优先级徽标 `高=🔴`、`中=🟡`、`低=🟢`；`已完成` / `已搁置` 目标使用删除线
 
-#### `_render_goal_form(editing: str) -> None`
+#### `_render_goal_form(editing: str, category_names: list[str]) -> None`
 - **入参**：`"NEW"` 表示新增；否则为 `annual_goals.id`
-- **功能**：编辑 `content/category/priority/deadline/status`；分类选择 `自定义` 时显示自定义维度输入框
+- **功能**：编辑 `content/category/priority/deadline/status`；分类下拉使用 `category_names`
 - **副作用**：保存时调用 `create_annual_goal()` 或 `update_annual_goal()`；取消/保存后清空 `planning_goal_editing`
+
+#### `_render_category_manager(categories: list[dict]) -> None`
+- **功能**：渲染可展开/折叠的分类管理面板；展示系统内置与用户自定义分类；支持新增分类与删除自定义分类
+- **保护规则**：系统内置分类根据 `is_system` 判断，只显示受保护标记，不提供删除入口；UI 层不硬编码系统分类名称
+- **副作用**：新增调用 `add_goal_category()`；删除调用 `delete_goal_category()`；增删后 `st.rerun()`，筛选器和表单下拉即时刷新
+- **约束**：空名称、已存在名称会提示并不写库；删除自定义分类不修改已有目标的 `category` 历史值
 
 ### 月度日历待办子页
 

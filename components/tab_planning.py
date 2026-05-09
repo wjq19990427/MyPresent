@@ -9,7 +9,6 @@ from html import escape
 import streamlit as st
 
 from core.db_manager import (
-    GOAL_CATEGORIES,
     GOAL_PRIORITIES,
     GOAL_STATUSES,
     TODO_CATEGORIES,
@@ -23,7 +22,10 @@ from core.db_manager import (
     get_annual_goal,
     get_annual_goals,
     get_calendar_todos,
+    get_goal_categories,
     postpone_todo,
+    add_goal_category,
+    delete_goal_category,
     update_annual_goal,
     update_calendar_todo,
 )
@@ -44,23 +46,35 @@ def render_planning_tab() -> None:
 
 
 def _render_annual_goals() -> None:
-    fc1, fc2, fc3 = st.columns([3, 3, 2])
+    categories = get_goal_categories()
+    category_names = [c["name"] for c in categories]
+
+    fc1, fc2, fc3, fc4 = st.columns([3, 3, 2, 2])
     with fc1:
         f_status = st.multiselect(
             "状态筛选", GOAL_STATUSES, key="planning_goal_filter_status"
         )
     with fc2:
         f_cat = st.multiselect(
-            "分类筛选", GOAL_CATEGORIES, key="planning_goal_filter_cat"
+            "分类筛选", category_names, key="planning_goal_filter_cat"
         )
     with fc3:
         if st.button("➕ 新增目标", key="add_goal_btn", type="primary"):
             st.session_state["planning_goal_editing"] = "NEW"
             st.rerun()
+    with fc4:
+        if st.button("分类管理", key="cat_manager_btn"):
+            st.session_state["planning_cat_manager_open"] = not st.session_state.get(
+                "planning_cat_manager_open", False
+            )
+            st.rerun()
+
+    if st.session_state.get("planning_cat_manager_open"):
+        _render_category_manager(categories)
 
     editing = st.session_state.get("planning_goal_editing")
     if editing:
-        _render_goal_form(editing)
+        _render_goal_form(editing, category_names)
 
     goals = get_annual_goals(status_filter=f_status or None)
     if f_cat:
@@ -74,18 +88,20 @@ def _render_annual_goals() -> None:
         _render_goal_row(goal)
 
 
-def _render_goal_form(editing: str) -> None:
+def _render_goal_form(editing: str, category_names: list[str]) -> None:
     is_new = editing == "NEW"
     goal = {} if is_new else (get_annual_goal(editing) or {})
     if not is_new and not goal:
         st.session_state["planning_goal_editing"] = None
         st.rerun()
 
-    category_value = goal.get("category", GOAL_CATEGORIES[0])
+    if not category_names:
+        st.warning("暂无可用分类，请先在分类管理中新增分类。")
+        return
+
+    category_value = goal.get("category", category_names[0])
     category_index = (
-        GOAL_CATEGORIES.index(category_value)
-        if category_value in GOAL_CATEGORIES
-        else GOAL_CATEGORIES.index("自定义")
+        category_names.index(category_value) if category_value in category_names else 0
     )
     priority_value = goal.get("priority", "中")
     priority_index = (
@@ -106,17 +122,9 @@ def _render_goal_form(editing: str) -> None:
         content = st.text_area(
             "目标内容 *", value=goal.get("content", ""), key="ge_content"
         )
-        cat_sel = st.selectbox(
-            "规划维度 *", GOAL_CATEGORIES, key="ge_cat", index=category_index
+        category = st.selectbox(
+            "规划维度 *", category_names, key="ge_cat", index=category_index
         )
-        if cat_sel == "自定义":
-            custom_default = "" if is_new or category_value == "自定义" else category_value
-            cat_custom = st.text_input(
-                "自定义维度名称", key="ge_cat_custom", value=custom_default
-            )
-            category = cat_custom.strip() or "自定义"
-        else:
-            category = cat_sel
         priority = st.selectbox(
             "优先级 *", GOAL_PRIORITIES, key="ge_priority", index=priority_index
         )
@@ -152,6 +160,45 @@ def _render_goal_form(editing: str) -> None:
             if st.button("取消", key="ge_cancel"):
                 st.session_state["planning_goal_editing"] = None
                 st.rerun()
+
+
+def _render_category_manager(categories: list[dict]) -> None:
+    with st.container(border=True):
+        st.markdown("#### 分类管理")
+        if not categories:
+            st.info("暂无分类。")
+        for category in categories:
+            name = category["name"]
+            is_system = bool(category["is_system"])
+            c1, c2 = st.columns([5, 1])
+            with c1:
+                suffix = " · 系统内置" if is_system else " · 自定义"
+                st.caption(f"{name}{suffix}")
+            with c2:
+                if is_system:
+                    st.caption("受保护")
+                elif st.button("删除", key=f"cat_del_{name}"):
+                    delete_goal_category(name)
+                    _remove_goal_filter_value(name)
+                    st.rerun()
+
+        new_name = st.text_input("新增分类", key="new_goal_category")
+        if st.button("添加分类", key="cat_add_btn", type="primary"):
+            normalized = new_name.strip()
+            if not normalized:
+                st.warning("分类名称不能为空")
+            elif any(c["name"] == normalized and c["is_system"] for c in categories):
+                st.warning("系统内置分类已存在")
+            elif any(c["name"] == normalized for c in categories):
+                st.warning("分类已存在")
+            else:
+                add_goal_category(normalized)
+                st.rerun()
+
+
+def _remove_goal_filter_value(name: str) -> None:
+    current = st.session_state.get("planning_goal_filter_cat", [])
+    st.session_state["planning_goal_filter_cat"] = [c for c in current if c != name]
 
 
 def _render_goal_row(goal: dict) -> None:
