@@ -3,7 +3,7 @@
 > `data/database.db` · WAL 模式 · `PRAGMA foreign_keys=ON`
 > Schema 单一信息源：`core/db_manager.py::_SCHEMA`
 
-## 表清单（实际 12 张）
+## 表清单（实际 14 张）
 
 | # | 表 | 主键 | 职责 | 契约状态 |
 |---|----|------|------|----------|
@@ -19,6 +19,8 @@
 | 10 | `llm_models` | `id` (TEXT) | 模型（→ provider） | ✅ |
 | 11 | `llm_logs` | autoinc | LLM 调用日志 | ✅ |
 | 12 | `operation_logs` | autoinc | session 操作审计日志 | ✅ |
+| 13 | `annual_goals` | `id` (TEXT) | 年度规划目标 | ✅ |
+| 14 | `calendar_todos` | `id` (TEXT) | 日历待办 | ✅ |
 
 ---
 
@@ -152,6 +154,33 @@
 
 ⚠️ **故意不加 FK**：保留审计历史，session 永久删除不影响操作日志。
 
+### 13. annual_goals
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| `id` | TEXT | **PK**（`YYYYMMDD_HHMMSS_ffffff`） |
+| `content` | TEXT | NOT NULL |
+| `category` | TEXT | NOT NULL |
+| `priority` | TEXT | NOT NULL, default `'中'` |
+| `deadline` | TEXT | NOT NULL（`YYYY-MM-DD`） |
+| `status` | TEXT | NOT NULL, default `'未开始'` |
+| `created_at` | TEXT | NOT NULL, default `strftime('%Y-%m-%d %H:%M:%S','now','localtime')` |
+
+### 14. calendar_todos
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| `id` | TEXT | **PK**（`YYYYMMDD_HHMMSS_ffffff`） |
+| `content` | TEXT | NOT NULL |
+| `category` | TEXT | NOT NULL |
+| `priority` | TEXT | NOT NULL, default `'中'` |
+| `target_date` | TEXT | NOT NULL（`YYYY-MM-DD`） |
+| `status` | TEXT | NOT NULL, default `'待办'` |
+| `recurrence` | TEXT | NOT NULL, default `'仅一次'` |
+| `linked_goal_id` | TEXT | **FK → annual_goals(id) ON DELETE SET NULL**，可空 |
+| `reflection` | TEXT | NOT NULL, default `''` |
+| `created_at` | TEXT | NOT NULL, default `strftime('%Y-%m-%d %H:%M:%S','now','localtime')` |
+
 ---
 
 ## 跨表不变量
@@ -159,5 +188,6 @@
 - 删除 `sessions` 行 → 级联删除 `session_files` / `session_tags` / `session_groups` / `edit_history` / `comments`
 - 删除 `groups` 行 → 级联删除 `session_groups`（`update_session_fields` 调用方仍需自行清理 UI 选择状态）
 - 删除 `llm_providers` 行 → 级联删除 `llm_models`，但 `llm_logs` 保留
+- 删除 `annual_goals` 行 → `calendar_todos.linked_goal_id` 置空，待办本身保留
 - 软删除 session 只改 `sessions.status/deleted_at/pre_delete_status`，不触发级联删除；永久删除才触发级联
 - 所有事务通过 `_conn()` 上下文管理器，异常自动 rollback

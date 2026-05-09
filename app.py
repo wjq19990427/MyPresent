@@ -13,6 +13,7 @@ from components.tab_archived import render_archived_tab
 from components.tab_search import render_search_tab
 from components.eval_dashboard import render_eval_dashboard
 from components.tab_recycle import render_recycle_tab
+from components.tab_planning import render_planning_tab
 
 
 def main() -> None:
@@ -23,13 +24,14 @@ def main() -> None:
     _ensure_indexed()
 
     st.title("🗂️ MyPresent 智能个人记录整理助手")
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "🗂️ 记录舱（上传）",
         "🖼️ 灵感墙（待处理）",
         "📚 已归档",
         "🔍 搜索",
         "📊 运行看板",
         "🗑️ 回收站",
+        "📋 规划控制台",
     ])
 
     with tab1:
@@ -44,6 +46,8 @@ def main() -> None:
         render_eval_dashboard()
     with tab6:
         render_recycle_tab()
+    with tab7:
+        render_planning_tab()
 
 
 if __name__ == "__main__":
