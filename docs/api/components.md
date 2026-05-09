@@ -20,6 +20,7 @@
 | `tab_search.py` | 「搜索」Tab（日期 + 语义 + 问答） | ✅ |
 | `tab_home.py` | 「主页」Tab（项目介绍 + 功能模块概览） | ✅ |
 | `eval_dashboard.py` | 「运行看板」Tab | ✅ |
+| `ai_analysis.py` | 上传草稿统一 AI 分析面板 | ✅ |
 | `ai_tagging.py` | AI 打标 UI 组件 | ✅ |
 | `ai_fill.py` | AI 感受/原因补全 UI 组件 | ✅ |
 | `tab_recycle.py` | 「回收站」Tab | ✅ |
@@ -139,10 +140,30 @@
 ### 已知陷阱
 
 - `upload_key` 自增是 streamlit 重置 file_uploader 的标准技巧——勿删
-- 上传时完整 AI Picker 在标签 multiselect 前渲染，只用 `description`，`feeling` 留空；应用结果通过 `_ai_applied_tags_upload_ai` 合并进标签默认值
-- AI 补全组件只在上传文件 / 粘贴文字模式渲染；应用结果直接写入 `upload_feeling` / `upload_reason` widget state，随后表单渲染读取该值
+- 上传时统一 AI 分析面板在标签 multiselect 前渲染；应用结果通过返回值交给 `tab_upload.py` 写入上传表单 state
+- 上传文件 / 粘贴文字模式渲染统一 AI 分析组件；组件返回采纳结果后，由本 Tab 写入 `upload_title` / `upload_summary` / `upload_feeling` / `upload_reason` 等表单 widget state
 - 文件夹导入路径保存在 `folder_selected_path`；切换路径时清空 `folder_scan_results`
 - 文件夹扫描会按原始文件名排除已上传文件，并把跳过数量写入 `folder_scan_skipped_n`
+
+---
+
+## ai_analysis.py
+
+> 上传草稿的统一 AI 分析面板。基于 `AnalysisSkill.execute_draft()`，替代上传流程中的旧 AI 打标 + AI 补全组合；旧组件仍供详情/归档流程使用。
+
+### `render_ai_analysis(draft: dict, model_id: str) -> dict | None`
+- **入参**：
+  - `draft`：上传表单当前字段值，至少含 `description`
+  - `model_id`：当前选中的 LLM 模型 ID
+- **行为**：
+  - 初始显示「✨ AI 分析」按钮；点击后调用 `AnalysisSkill().execute_draft(draft, model_id, fields="all")`
+  - 结果面板按字段展示标题、摘要、领域、视角、话题、情绪、情绪描述、感受、原因
+  - 每个字段支持「↺ 重生成」展开三级 hint：无 hint 再试一次、字段预设快捷 hint、自定义 hint
+  - 局部重生成只调用对应字段并合并回缓存，不清空其他字段
+  - 支持「全部采纳」与逐项勾选后「采纳勾选项」
+- **返回**：用户采纳后返回已选字段 dict；未操作时返回 `None`
+- **副作用**：读写 `st.session_state` 的 `_analysis_result` / `_analysis_field_states` / `_analysis_apply_payload`；不直接写 DB，不直接写上传表单 widget
+- **约束**：不得替代 `tab_upload.py` 做入库；调用方负责把返回值写入表单或标签控件
 
 ---
 

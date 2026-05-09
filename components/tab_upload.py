@@ -9,8 +9,7 @@ from core.constants import TEXT_EXTS, SUPPORTED_IMPORT_EXTS, FIELD_SCHEMA
 from core.db_manager import get_tags_registry, validate_session
 from core.file_io import save_session_pending, save_session_final, import_folder_to_pending
 from components.forms import render_field_inputs
-from components.ai_fill import render_ai_fill_picker
-from components.ai_tagging import render_ai_tag_picker
+from components.ai_analysis import render_ai_analysis
 
 
 def _pasted_filename(text: str) -> str:
@@ -45,6 +44,44 @@ def _get_uploaded_filenames() -> set[str]:
             if m:
                 result.add(m.group(1))
     return result
+
+
+def _build_upload_draft(description: str) -> dict:
+    draft = {"description": description}
+    for field in FIELD_SCHEMA:
+        key = field["key"]
+        if key == "description":
+            continue
+        if field["type"] == "date_or_text":
+            text_key = f"upload_{key}_text"
+            date_key = f"upload_{key}_date"
+            text_value = str(st.session_state.get(text_key, "")).strip()
+            draft[key] = text_value or str(st.session_state.get(date_key, "") or "")
+        else:
+            draft[key] = st.session_state.get(f"upload_{key}", "")
+    return draft
+
+
+def _apply_analysis_to_upload_form(result: dict, upload_tags_key: str) -> None:
+    for key in ("title", "summary", "feeling", "reason"):
+        if key in result:
+            st.session_state[f"upload_{key}"] = result.get(key, "")
+
+    tag_options = set(get_tags_registry())
+    tag_fields = ("domains", "attributes", "topics", "emotion_tags")
+    suggested_tags = []
+    for key in tag_fields:
+        suggested_tags.extend(
+            item for item in (result.get(key, []) or []) if item in tag_options
+        )
+    suggested_tags.extend(
+        item for item in (result.get("new_topics", []) or []) if item in tag_options
+    )
+    if suggested_tags:
+        current = st.session_state.get(upload_tags_key, [])
+        st.session_state[upload_tags_key] = list(dict.fromkeys([*current, *suggested_tags]))
+
+    st.rerun()
 
 
 def _render_folder_import() -> None:
@@ -221,30 +258,25 @@ def render_upload_tab() -> None:
 
     skip = {"description"} if is_text_content else set()
 
-    upload_ai_key = "upload_ai"
     upload_tags_key = f"upload_tags_{st.session_state.upload_key}"
     model_id = st.session_state.get("llm_selected_model") or ""
-    render_ai_tag_picker(
-        session_data={"description": auto_description, "feeling": ""},
+    draft_for_ai = _build_upload_draft(auto_description)
+    analysis_result = render_ai_analysis(
+        draft=draft_for_ai,
         model_id=model_id,
-        state_key=upload_ai_key,
-        apply_key=upload_tags_key,
     )
-    render_ai_fill_picker(
-        session_data={"description": auto_description},
-        model_id=model_id,
-        state_key="upload_fill",
-        form_prefix="upload",
-    )
+    if analysis_result:
+        _apply_analysis_to_upload_form(analysis_result, upload_tags_key)
 
     st.divider()
     st.markdown("**🏷️ 标签** **\\*（必填）**")
-    ai_applied_tags = st.session_state.get(f"_ai_applied_tags_{upload_ai_key}", [])
     tag_options = get_tags_registry()
     upload_tags = st.multiselect(
         "标签",
         options=tag_options,
-        default=[t for t in ai_applied_tags if t in tag_options],
+        default=[
+            t for t in st.session_state.get(upload_tags_key, []) if t in tag_options
+        ],
         key=upload_tags_key,
         label_visibility="collapsed",
         placeholder="至少选择一个标签",
