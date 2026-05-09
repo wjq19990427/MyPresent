@@ -257,7 +257,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 
 ## tab_planning.py
 
-> 「📋 规划控制台」Tab。包含「🎯 年度规划」与「📅 月度日历待办」两个子页。
+> 「📋 规划控制台」Tab。包含「🎯 年度规划」与「📅 日历 & 日志」两个子页。
 
 ### `render_planning_tab() -> None`
 - **副作用**：渲染规划控制台两个子 Tab；年度规划调 `_render_annual_goals()`，日历待办调 `_render_calendar_todos()`
@@ -269,7 +269,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **功能**：状态/分类筛选、分类管理、新增目标、目标列表展示、状态即时更新、编辑、删除
 - **分类来源**：运行时调用 `get_goal_categories()`，筛选器与表单下拉框均使用 DB 中实际分类
 - **依赖 session_state**：`planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_goal_editing` / `planning_cat_manager_open`
-- **视觉约定**：优先级徽标 `高=🔴`、`中=🟡`、`低=🟢`；`已完成` / `已搁置` 目标使用删除线
+- **视觉约定**：优先级徽标 `高=🔴 高`、`中=🟡 中`、`低=🟢 低`；`已完成` / `已搁置` 目标使用删除线
 
 #### `_render_goal_row(goal: dict) -> None`
 - **功能**：渲染单条年度目标；有关联待办时额外显示整体进度（已完成数 / 总数 + 进度条），并提供只读展开区查看关联待办
@@ -288,22 +288,22 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **副作用**：新增调用 `add_goal_category()`；删除调用 `delete_goal_category()`；增删后 `st.rerun()`，筛选器和表单下拉即时刷新
 - **约束**：空名称、已存在名称会提示并不写库；删除自定义分类不修改已有目标的 `category` 历史值
 
-### 月度日历待办子页
+### 日历 & 日志子页
 
 #### `_render_calendar_todos() -> None`
-- **功能**：月份导航、周一到周日的方格月历、日期选择、日期内待办摘要、选中日期或整月待办列表、新增待办入口
-- **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding`
-- **视觉约定**：星期标题与日期格共用同一列规格；日期格展示日期数字与最多 3 条待办摘要，超出显示 `+N 更多`；今日和选中日期有不同高亮
+- **功能**：月份导航、周一到周日的方格月历、日期选择、日期内待办摘要、事务数量提示、选中日期的待办事宜与今日事务、整月待办列表、新增待办入口
+- **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding`
+- **视觉约定**：星期标题与日期格共用同一列规格；日期格展示日期数字、最多 3 条待办摘要和今日事务数量提示，超出显示 `+N 更多`；今日和选中日期有不同高亮
 - **交互约定**：选中具体日期后新增待办默认填入该日期；日期视图提供返回月份视图入口，清空 `planning_cal_date`
 - **注意**：重复规则只存储和展示，不在 UI 层自动生成实例
 
 #### `_render_month_nav(year: int, month: int) -> None`
 - **功能**：渲染月份导航，支持 `◀` / `▶` 逐月翻页，也支持年份与月份直接跳转
-- **副作用**：任意月份变更写 `planning_cal_year` / `planning_cal_month`，清空 `planning_cal_date` 后 `st.rerun()`
+- **副作用**：任意月份变更写 `planning_cal_year` / `planning_cal_month`，清空 `planning_cal_date` / `planning_activity_adding` 后 `st.rerun()`
 
-#### `_render_calendar_cell(year, month, day_num, selected_date, day_map) -> None`
+#### `_render_calendar_cell(year, month, day_num, selected_date, day_map, activity_map) -> None`
 - **功能**：渲染单个方格日期块；空白日期渲染等高占位；有效日期提供选择按钮
-- **视觉约定**：已完成待办摘要使用删除线；日期格与星期标题保持列对齐
+- **视觉约定**：已完成待办摘要使用删除线；有今日事务时显示 `📝 事务 N 条`；日期格与星期标题保持列对齐
 
 #### `_render_todo_form(selected_date: str | None, year: int, month: int) -> None`
 - **渲染条件**：仅当 `planning_todo_adding=True` 时显示
@@ -316,6 +316,11 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **完成流程**：勾选未完成待办时打开复盘输入；确认或跳过后调用 `complete_todo()`；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
 - **延期流程**：仅未完成待办显示「延期」入口；展开内联表单后确认调用 `postpone_todo()`；`postpone_count > 0` 时信息行显示延期次数
 - **依赖 session_state**：`_reflection_open` / `_postpone_open`，结构均为 `{todo_id: True}`
+
+#### `_render_daily_activities(selected_date: str, activities: list[dict]) -> None`
+- **渲染条件**：仅在选中具体日期时显示
+- **功能**：展示该日今日事务列表；提供「记录今日事务」入口；新增表单字段为 `description/category/duration`
+- **副作用**：保存时调用 `create_daily_activity()`；删除时调用 `delete_daily_activity()`；保存/取消后关闭表单
 
 ---
 
