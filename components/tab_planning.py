@@ -435,7 +435,7 @@ def _render_calendar_cell(
 ) -> None:
     if day_num == 0:
         st.markdown(
-            "<div style='min-height:7.5rem;border:1px solid transparent'></div>",
+            "<div style='min-height:8.9rem;border:1px solid transparent'></div>",
             unsafe_allow_html=True,
         )
         return
@@ -445,8 +445,12 @@ def _render_calendar_cell(
     is_selected = d_str == selected_date
     day_todos = day_map.get(d_str, [])
     day_activities = activity_map.get(d_str, [])
+    st.markdown(
+        _calendar_cell_html(day_num, is_today, is_selected, day_todos, day_activities),
+        unsafe_allow_html=True,
+    )
     if st.button(
-        _calendar_cell_label(day_num, is_today, day_todos, day_activities),
+        "已选中" if is_selected else "查看",
         key=f"cal_{d_str}",
         type="primary" if is_selected else "secondary",
         use_container_width=True,
@@ -459,54 +463,86 @@ def _render_calendar_cell(
         st.rerun()
 
 
-def _calendar_cell_label(
+def _calendar_cell_html(
     day_num: int,
     is_today: bool,
+    is_selected: bool,
     todos: list[dict],
     activities: list[dict],
 ) -> str:
-    day_label = f"📍 **{day_num}**" if is_today else str(day_num)
+    border = "#2563eb" if is_selected else "#d1d5db"
+    background = "#eff6ff" if is_selected else "#ffffff"
+    shadow = "0 0 0 1px rgba(37,99,235,.14)" if is_selected else "none"
+    day_label = f"📍 {day_num}" if is_today else str(day_num)
     summaries = [_calendar_todo_summary(t) for t in todos[:MAX_DAY_TODOS]]
     if len(todos) > MAX_DAY_TODOS:
-        summaries.append(f"+{len(todos) - MAX_DAY_TODOS} 更多")
+        summaries.append(
+            "<div style='font-size:.68rem;color:#64748b;margin-top:.14rem;'>"
+            f"+{len(todos) - MAX_DAY_TODOS} 更多</div>"
+        )
+    activity_html = ""
     if activities:
-        summaries.append(f"📝 事务 {len(activities)} 条")
-    if not summaries:
-        summaries = [" "]
-    return "\n\n".join([day_label, *summaries])
+        separator = ""
+        if summaries:
+            separator = (
+                "<div style='height:1px;background:#e5e7eb;margin:.32rem 0 .26rem;'>"
+                "</div>"
+            )
+        activity_html = (
+            f"{separator}<div style='font-size:.68rem;color:#334155;"
+            "background:#f8fafc;border:1px solid #e2e8f0;border-radius:.35rem;"
+            "padding:.08rem .28rem;display:inline-block;'>📝 事务｜"
+            f"{len(activities)} 条</div>"
+        )
+    summaries_html = "".join(summaries) or "&nbsp;"
+    return (
+        f"<div style='min-height:7.35rem;border:1px solid {border};"
+        f"background:{background};box-shadow:{shadow};border-radius:.45rem;"
+        "padding:.42rem .46rem;overflow:hidden;'>"
+        f"<div style='font-size:.86rem;font-weight:700;color:#111827;"
+        f"margin-bottom:.32rem;'>{escape(day_label)}</div>"
+        f"{summaries_html}{activity_html}</div>"
+    )
 
 
 def _calendar_todo_summary(todo: dict) -> str:
-    priority_text = _priority_text(todo["priority"])
-    content = todo["content"][:18]
+    priority_label = _priority_label(todo["priority"], compact=True)
+    content = escape(todo["content"][:18])
     if todo["status"] == "已完成":
-        content = f"~~{content}~~"
-    return f"{priority_text} {content}"
+        content = f"<s>{content}</s>"
+    return (
+        "<div style='font-size:.69rem;line-height:1.38;margin:.16rem 0;"
+        "color:#334155;white-space:normal;'>"
+        f"{priority_label}<span>{content}</span></div>"
+    )
 
 
 def _priority_text(priority: str) -> str:
     return f"优先级：{priority}" if priority in PRIORITY_COLORS else "优先级：未定"
 
 
-def _priority_label(priority: str) -> str:
+def _priority_label(priority: str, compact: bool = False) -> str:
     color, bg, border = PRIORITY_COLORS.get(
         priority, ("#475569", "#f8fafc", "#cbd5e1")
     )
+    padding = "0.02rem 0.26rem" if compact else "0.08rem 0.42rem"
+    font_size = "0.66rem" if compact else "0.78rem"
+    margin_right = "0.18rem" if compact else "0.35rem"
     return (
         "<span style=\""
         "display:inline-flex;"
         "align-items:center;"
-        "padding:0.08rem 0.42rem;"
+        f"padding:{padding};"
         "border-radius:0.35rem;"
         f"border:1px solid {border};"
         f"background:{bg};"
         f"color:{color};"
-        "font-size:0.78rem;"
+        f"font-size:{font_size};"
         "font-weight:600;"
         "line-height:1.35;"
         "white-space:nowrap;"
         "vertical-align:middle;"
-        "margin-right:0.35rem;"
+        f"margin-right:{margin_right};"
         f"\">优先级：{escape(priority) if priority else '未定'}</span>"
     )
 

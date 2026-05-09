@@ -293,7 +293,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 #### `_render_calendar_todos() -> None`
 - **功能**：月份导航、周一到周日的方格月历、日期选择、日期内待办摘要、事务数量提示、选中日期的待办事宜与今日事务、整月待办列表、新增待办入口
 - **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding`
-- **视觉约定**：星期标题与日期格共用同一列规格；日期格展示日期数字、最多 3 条待办摘要和今日事务数量提示，超出显示 `+N 更多`；今日和选中日期有不同高亮
+- **视觉约定**：星期标题与日期格共用同一列规格；日期格使用 HTML 信息块展示日期数字、最多 3 条待办摘要和今日事务数量提示；待办摘要前置小号彩色边框优先级标签；待办与事务之间用分隔线区分，超出显示 `+N 更多`；今日和选中日期有不同高亮
 - **交互约定**：选中具体日期后新增待办默认填入该日期；日期视图提供返回月份视图入口，清空 `planning_cal_date`
 - **注意**：重复规则只存储和展示，不在 UI 层自动生成实例
 
@@ -303,7 +303,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 
 #### `_render_calendar_cell(year, month, day_num, selected_date, day_map, activity_map) -> None`
 - **功能**：渲染单个方格日期块；空白日期渲染等高占位；有效日期提供选择按钮
-- **视觉约定**：已完成待办摘要使用删除线；有今日事务时显示 `📝 事务 N 条`；日期格与星期标题保持列对齐
+- **视觉约定**：已完成待办摘要使用删除线；有今日事务时显示 `📝 事务｜N 条`；信息块下方使用 `查看` / `已选中` 按钮选择日期；日期格与星期标题保持列对齐
 
 #### `_render_todo_form(selected_date: str | None, year: int, month: int) -> None`
 - **渲染条件**：仅当 `planning_todo_adding=True` 时显示
