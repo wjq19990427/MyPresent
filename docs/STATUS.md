@@ -18,15 +18,14 @@
 
 ## 当前焦点
 
-- **task-10~14b 全部完成** ✅：回收站预览 + 批量管理 + 看板筛选 + API测试 + AI补全
+- **v4.1 功能已完成并测试通过** ✅
 - 已知技术债：`tab_search` 跨层调用 `vector_db._get_*`；`FIELD_SCHEMA` 增字段需手改 5 处
 
 ## 最近完成
 
-- **task-14a/b merge**：`CompletionSkill` + `render_ai_fill_picker` 三处集成
-- **task-10/11/12/13 merge**：回收站内容预览、批量管理、看板筛选、追加模型测试流程
-- **task-9 merge**：回收站 Tab + 运行看板操作记录
-- **task-4~8 merge**：文件夹导入优化 + AI Picker + 软删除体系
+- **task-15 merge**：AI补全直接赋值修复 + 灵感墙 AI 标签，全功能测试通过
+- **task-10~14b merge**：回收站预览、批量管理、看板筛选、追加模型测试、AI 感受/原因补全
+- **task-4~9 merge**：文件夹导入优化、AI Picker、软删除回收站体系
 
 ## 待办 / TODO
 
