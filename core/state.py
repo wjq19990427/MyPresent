@@ -8,6 +8,8 @@ import streamlit as st
 
 def init_state() -> None:
     for k, v in {
+        "active_top_nav":       "home",
+        "_nav_target":          None,
         "upload_key":            0,
         "pending_selected":      None,
         "archived_selected":     None,

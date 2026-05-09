@@ -424,6 +424,7 @@
 
 ### 当前管理的键（按域分组）
 
+- **导航**：`active_top_nav` / `_nav_target`
 - **选择状态**：`pending_selected` / `archived_selected` / `search_selected`
 - **搜索**：`semantic_results` / `semantic_query_used` / `date_filter_exact` / `_fuzzy` / `_range` / `_search_mode_prev`
 - **已归档过滤**：`archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`

@@ -31,10 +31,11 @@
 
 > 「主页」Tab。展示项目介绍与 5 个功能模块卡片。
 
-### `render_home() -> None`
+### `render_home(on_navigate: Callable[[str], None] | None = None) -> None`
 - **功能**：渲染标题区、项目介绍文案，以及「记录台 / 探索 / 规划台 / 回收站 / 系统」5 个模块卡片
+- **入参**：`on_navigate` 可选导航回调；用户点击模块入口时传入目标 key（`record/search/planning/recycle/system`）
 - **布局**：模块卡片使用 `st.columns` 分两行展示；每张卡片使用 `st.container(border=True)` 渲染边框
-- **副作用**：无写库、无 `session_state` 读写、无交互控件
+- **副作用**：无写库；提供 `on_navigate` 时点击模块入口会调用该回调
 - **约束**：顶层直接调用，不嵌套在任何 `st.form` 内
 
 ---

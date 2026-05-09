@@ -17,6 +17,16 @@ from components.tab_recycle import render_recycle_tab
 from components.tab_planning import render_planning_tab
 
 
+_NAV_ITEMS = {
+    "home": "🏠 主页",
+    "record": "📝 记录台",
+    "search": "🔍 探索",
+    "planning": "📋 规划台",
+    "recycle": "🗑️ 回收站",
+    "system": "⚙️ 系统",
+}
+
+
 def main() -> None:
     st.set_page_config(page_title="灵感记录工具", page_icon="🗂️", layout="wide")
     init_db()
@@ -24,33 +34,52 @@ def main() -> None:
     init_state()
     _ensure_indexed()
 
-    tabs = st.tabs([
-        "🏠 主页",
-        "📝 记录台",
-        "🔍 探索",
-        "📋 规划台",
-        "🗑️ 回收站",
-        "⚙️ 系统",
-    ])
+    _sync_nav_value()
+    selected = st.segmented_control(
+        "主导航",
+        options=list(_NAV_ITEMS.keys()),
+        format_func=lambda key: _NAV_ITEMS[key],
+        key="active_top_nav",
+        label_visibility="collapsed",
+    )
+    if selected is None:
+        selected = "home"
 
-    with tabs[0]:
-        render_home()
-    with tabs[1]:
-        inner = st.tabs(["⬆️ 上传", "🗂️ 待处理", "📚 已归档"])
-        with inner[0]:
-            render_upload_tab()
-        with inner[1]:
-            render_gallery_tab()
-        with inner[2]:
-            render_archived_tab()
-    with tabs[2]:
+    if selected == "home":
+        render_home(_navigate_to)
+    elif selected == "record":
+        _render_record_tab()
+    elif selected == "search":
         render_search_tab()
-    with tabs[3]:
+    elif selected == "planning":
         render_planning_tab()
-    with tabs[4]:
+    elif selected == "recycle":
         render_recycle_tab()
-    with tabs[5]:
+    elif selected == "system":
         render_eval_dashboard()
+
+
+def _sync_nav_value() -> None:
+    target = st.session_state.get("_nav_target")
+    if target in _NAV_ITEMS:
+        st.session_state["active_top_nav"] = target
+        st.session_state["_nav_target"] = None
+
+
+def _navigate_to(target: str) -> None:
+    if target in _NAV_ITEMS:
+        st.session_state["_nav_target"] = target
+        st.rerun()
+
+
+def _render_record_tab() -> None:
+    inner = st.tabs(["⬆️ 上传", "🗂️ 待处理", "📚 已归档"])
+    with inner[0]:
+        render_upload_tab()
+    with inner[1]:
+        render_gallery_tab()
+    with inner[2]:
+        render_archived_tab()
 
 
 if __name__ == "__main__":
