@@ -122,7 +122,8 @@
 
 ### `render_upload_tab() -> None`
 - **副作用**：归档调 `save_session_final`；暂存调 `save_session_pending`；文件夹模式调 `import_folder_to_pending`
-- **依赖 session_state**：`upload_key`（计数器，提交后 +1，触发 `file_uploader` 重置）
+- **依赖 session_state**：`upload_key`（计数器，提交后 +1，触发 `file_uploader` 重置）/ `upload_prefill`（规划台跳转预填数据，消费后清空）
+- **预填行为**：若 `upload_prefill` 存在，上传页切换到「📝 粘贴文字」，显示 `st.info("✍️ 已从今日规划预填内容，可继续扩充")`，将 `description` 写入粘贴文本框，将 `topics` 补入标签注册表并默认选中，然后立即清空 `upload_prefill`
 
 ### 内部子组件
 
@@ -352,10 +353,11 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 - **延期流程**：仅未完成待办显示「延期」入口；展开内联表单后确认调用 `postpone_todo()`；`postpone_count > 0` 时信息行显示延期次数
 - **依赖 session_state**：`_reflection_open` / `_postpone_open`，结构均为 `{todo_id: True}`
 
-#### `_render_daily_activities(selected_date: str, activities: list[dict]) -> None`
+#### `_render_daily_activities(selected_date: str, activities: list[dict], todos: list[dict]) -> None`
 - **渲染条件**：仅在选中具体日期时显示
 - **功能**：展示该日今日事务列表；提供「记录今日事务」入口；新增表单字段为 `description/category/duration`
-- **副作用**：保存时调用 `create_daily_activity()`；删除时调用 `delete_daily_activity()`；保存/取消后关闭表单
+- **副作用**：保存时调用 `create_daily_activity()`；删除时调用 `delete_daily_activity()`；保存/取消后关闭表单；保存成功后写 `planning_record_moment_date` 以显示「记录此刻」入口
+- **记录此刻**：保存事务后在当日事务列表下方内联显示「📝 记录此刻的想法？」；点「不了」清空提示状态；点「去记录」调用 `core.llm_client.call_llm(expect_json=False)` 生成草稿，写入 `upload_prefill={"description": ..., "topics": ..., "source": "planning"}`，再设置 `_nav_target=("📝 记录台", "⬆️ 上传")` 跳转到上传页
 
 ---
 

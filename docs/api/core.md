@@ -374,6 +374,8 @@
 | `STORY_PERIOD_USER_TMPL` | 时间段叙事 user | `{period}` `{memories}` |
 | `ANALYSIS_SYSTEM` | 结构化分析 system | — |
 | `ANALYSIS_USER_TMPL` | 结构化分析 user | `{content}` `{fields}` `{registry_section}` `{hint_section}` |
+| `PLANNING_RECORD_MOMENT_SYSTEM` | 规划台「记录此刻」草稿生成 system | — |
+| `PLANNING_RECORD_MOMENT_USER_TMPL` | 规划台「记录此刻」草稿生成 user | `{date}` `{activities}` `{todos}` |
 | `QA_SYSTEM` | 智能问答 system | — |
 
 ### 修改原则
@@ -467,10 +469,11 @@
 - **搜索**：`semantic_results` / `semantic_query_used` / `date_filter_exact` / `_fuzzy` / `_range` / `_search_mode_prev`
 - **已归档过滤**：`archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`
 - **文件夹批量导入**：`folder_selected_path` / `folder_scan_results` / `folder_scan_skipped_n` / `folder_import_done`
+- **上传预填**：`upload_prefill`
 - **智能问答**：`llm_selected_model` / `llm_chat_history`
 - **LLM 配置编辑**：`_editing_pvd` / `_editing_mdl` / `_draft_provider` / `_draft_model` / `_test_result` / `_draft_test_passed` / `_confirm_edit_pvd` / `_confirm_edit_mdl`
 - **杂项**：`upload_key`
-- **规划控制台**：`planning_sub_tab` / `planning_goal_editing` / `planning_cat_manager_open` / `planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `_reflection_open` / `_postpone_open`
+- **规划控制台**：`planning_sub_tab` / `planning_goal_editing` / `planning_cat_manager_open` / `planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `planning_record_moment_date` / `_reflection_open` / `_postpone_open`
 
 ### 未在此登记的运行期键（隐式）
 
@@ -489,6 +492,12 @@
 - `active_sub_tab`：各外层 Tab 的内层激活 sub-tab 字典，默认 `{}`
 - `_nav_target`：编程跳转指令，格式为 `(外层Tab名, 子Tab名或 None)`；`app.py` 在渲染导航前消费并置 `None`
 - 组件可通过 `st.session_state["_nav_target"] = ("📝 记录台", "⬆️ 上传"); st.rerun()` 跳转到指定页面
+
+### 上传预填协议
+
+- `upload_prefill`：上传页一次性预填数据，默认 `None`
+- 结构：`{"description": str, "topics": list[str], "source": "planning"}`
+- 消费方：`components/tab_upload.py` 在首次渲染上传页时读取，写入粘贴文本与标签区后立即置 `None`
 
 ## constants.py
 
