@@ -246,15 +246,6 @@ def _render_folder_import() -> None:
         label_visibility="collapsed",
     )
 
-    st.markdown("**🏷️ 标签** **\\*（必填）**")
-    folder_tags = st.multiselect(
-        "标签",
-        options=get_tags_registry(),
-        key="folder_import_tags",
-        label_visibility="collapsed",
-        placeholder="至少选择一个标签",
-    )
-
     selected_paths = [Path(p) for p in scan_results if Path(p).name in selected_names]
     if selected_paths:
         total_mb = sum(p.stat().st_size for p in selected_paths if p.exists()) / 1024 / 1024
@@ -266,16 +257,11 @@ def _render_folder_import() -> None:
         )
 
         if st.button("📥 导入到灵感墙", type="primary", key="do_import_btn"):
-            if not folder_tags:
-                st.error("❌ 请至少选择一个标签后再导入")
-            else:
-                with st.spinner(f"正在导入 {len(selected_paths)} 个文件…"):
-                    count = import_folder_to_pending(
-                        selected_paths, as_one_session=as_one, tags=folder_tags
-                    )
-                st.session_state["folder_scan_results"] = []
-                st.session_state["folder_import_done"]  = count
-                st.rerun()
+            with st.spinner(f"正在导入 {len(selected_paths)} 个文件…"):
+                count = import_folder_to_pending(selected_paths, as_one_session=as_one)
+            st.session_state["folder_scan_results"] = []
+            st.session_state["folder_import_done"]  = count
+            st.rerun()
     else:
         st.info("请至少选择一个文件")
 

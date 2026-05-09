@@ -39,6 +39,7 @@ _REGISTRY_BY_FIELD = {
     "topics": ("topic", "主题标签"),
     "emotion_tags": ("emotion", "情绪标签"),
 }
+_REGISTRY_PROMPT_LIMIT = 20
 
 
 class AnalysisSkill(BaseSkill):
@@ -99,7 +100,7 @@ class AnalysisSkill(BaseSkill):
     ) -> SkillResult:
         if not model_id:
             return SkillResult(success=False, error="未指定 model_id")
-        if not str(draft.get("description", "")).strip():
+        if not str(draft.get("description", "")).strip() and not _file_names(draft):
             return SkillResult(success=False, error="描述为空，无法分析")
 
         requested, error = _normalize_fields(fields)
@@ -178,6 +179,10 @@ def _build_content(session: dict) -> str:
         value = str(session.get(key, "")).strip()
         if value:
             lines.append(f"{label}：{value}")
+    if not lines:
+        names = _file_names(session)
+        if names:
+            lines.append("文件名：" + "、".join(names))
     return "\n".join(lines)
 
 
@@ -205,7 +210,7 @@ def _build_registry_section(requested: list[str]) -> str:
         if not config:
             continue
         _, label = config
-        names = _registry_names_for_field(field)
+        names = _registry_names_for_field(field)[:_REGISTRY_PROMPT_LIMIT]
         parts.append(f"- {field}（{label}）：{_format_names(names)}")
     return "\n".join(parts) if parts else "（本次请求字段不依赖标签候选）"
 
@@ -248,3 +253,19 @@ def _as_list(value) -> list[str]:
     else:
         items = [value]
     return [str(item).strip() for item in items if str(item).strip()]
+
+
+def _file_names(session: dict) -> list[str]:
+    files = session.get("files", [])
+    if not isinstance(files, list):
+        return []
+    names = []
+    for file_info in files:
+        if not isinstance(file_info, dict):
+            continue
+        name = str(
+            file_info.get("original_name") or file_info.get("filename") or ""
+        ).strip()
+        if name:
+            names.append(name)
+    return names

@@ -152,10 +152,10 @@
 #### `execute_draft(self, draft: dict, model_id: str, *, fields="all", hint="") -> SkillResult`
 
 - **用途**：上传流程保存前的草稿分析；不需要 `session_id`
-- **入参**：`draft` 为当前上传表单字段值，至少要求 `description` 非空；`fields` / `hint` 与 `execute()` 一致
+- **入参**：`draft` 为当前上传表单或详情页当前 UI 草稿；通常含 `description`，若文字字段为空但 `files[].original_name/filename` 存在，则用文件名作为内容兜底；`fields` / `hint` 与 `execute()` 一致
 - **返回**：同 `execute()`，`SkillResult.data` 仅包含请求字段；请求 `topics` 时额外含 `new_topics`
 - **副作用**：调 `core.llm_client.call_llm(expect_json=True)`，自动写 `llm_logs`；读 `label_registry`；不读写 `sessions`
-- **失败路径**：缺 `model_id` / `draft["description"]` 为空 / 非法 `fields` / LLM 调用或 JSON 解析失败
+- **失败路径**：缺 `model_id` / 文本字段与文件名均为空 / 非法 `fields` / LLM 调用或 JSON 解析失败
 
 #### `run(self, session: dict, model_id: str = "", **kwargs) -> SkillResult`
 
@@ -166,6 +166,7 @@
 
 - `core/prompts.ANALYSIS_SYSTEM` / `ANALYSIS_USER_TMPL`（变量 `{content}` `{fields}` `{registry_section}` `{hint_section}`）
 - 改 prompt 必须同步检查输出字段名和 `AnalysisSkill._sanitize_result()` 的字段过滤逻辑
+- `registry_section` 每个 label type 最多拼入前 20 条候选（沿用 `get_label_registry()` 的 `is_system DESC, name ASC` 顺序），避免标签库增大导致 prompt 线性膨胀
 
 ## story_skill.py
 
