@@ -372,6 +372,8 @@
 | `STORY_SINGLE_USER_TMPL` | 单条摘要 user | `{content_time}` `{description}` `{feeling}` `{reason_section}` |
 | `STORY_PERIOD_SYSTEM` | 时间段叙事 system | — |
 | `STORY_PERIOD_USER_TMPL` | 时间段叙事 user | `{period}` `{memories}` |
+| `ANALYSIS_SYSTEM` | 结构化分析 system | — |
+| `ANALYSIS_USER_TMPL` | 结构化分析 user | `{content}` `{fields}` `{registry_section}` `{hint_section}` |
 | `QA_SYSTEM` | 智能问答 system | — |
 
 ### 修改原则

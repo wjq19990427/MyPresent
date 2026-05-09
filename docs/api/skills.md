@@ -14,6 +14,7 @@
 |------|------|----------|
 | `base_skill.py` | `BaseSkill(ABC)` + `SkillResult(success, data, error)` | ✅ |
 | `tagging_skill.py` | 自动打标（从注册表中推荐） | ✅ |
+| `analysis_skill.py` | 单次结构化分析（标题/摘要/标签/感受/原因） | ✅ |
 | `story_skill.py` | 单条摘要 + 时间段叙事 | ✅ |
 
 ---
@@ -113,6 +114,50 @@
 
 - `core/prompts.TAGGING_SYSTEM` / `TAGGING_USER_TMPL`（变量 `{content}`）
 - 改 prompt 必须同步检查输出字段名（`suggested_tags / new_tags / reasoning`）
+
+## analysis_skill.py
+
+> 单次 LLM 调用分析一条记录，返回标题、摘要、结构化标签、情绪说明、感受与记录原因；支持局部字段重生成和 hint 引导。
+
+### `class AnalysisSkill(BaseSkill)`
+
+- `name = "analysis"` · `description = "分析记录并返回标题、摘要、结构化标签、感受与记录原因"`
+
+#### `execute(self, session_id: str, model_id: str, *, fields="all", hint="") -> SkillResult`
+
+- **入参**：
+  - `session_id`：目标记录 ID；内部调用 `db_manager.get_session()` 读取完整 session
+  - `model_id`：必填，传给 `core.llm_client.call_llm`
+  - `fields`：`"all"` 或字段名列表；合法字段为 `title / summary / domains / attributes / topics / emotion_tags / emotion_note / feeling / reason`
+  - `hint`：可选调整提示；非空时追加进 user prompt
+- **返回**：`SkillResult.data` 仅包含请求字段；当请求包含 `topics` 时额外包含 `new_topics`
+  ```
+  {
+    "title": str,
+    "summary": str,
+    "domains": list[str],
+    "attributes": list[str],
+    "topics": list[str],
+    "new_topics": list[str],
+    "emotion_tags": list[str],
+    "emotion_note": str,
+    "feeling": str,
+    "reason": str,
+  }
+  ```
+- **局部模式**：只拼入请求字段依赖的 registry 数据；`feeling / reason / title / summary / emotion_note` 不拼 registry
+- **副作用**：调 `core.llm_client.call_llm(expect_json=True)`，自动写 `llm_logs`；只读 `sessions` 和 `label_registry`，不写 DB
+- **失败路径**（不抛异常，转 `SkillResult(success=False, error=...)`）：缺 `model_id` / 缺 `session_id` / 记录不存在 / 内容为空 / 非法 `fields` / LLM 调用或 JSON 解析失败
+
+#### `run(self, session: dict, model_id: str = "", **kwargs) -> SkillResult`
+
+- **用途**：兼容 `BaseSkill.run()`；从 `session["session_id"]` 或 `session["id"]` 取 ID 后委托 `execute()`
+- **kwargs**：透传 `fields` / `hint`
+
+### Prompt 依赖
+
+- `core/prompts.ANALYSIS_SYSTEM` / `ANALYSIS_USER_TMPL`（变量 `{content}` `{fields}` `{registry_section}` `{hint_section}`）
+- 改 prompt 必须同步检查输出字段名和 `AnalysisSkill._sanitize_result()` 的字段过滤逻辑
 
 ## story_skill.py
 
