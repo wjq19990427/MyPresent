@@ -6,7 +6,7 @@ from pathlib import Path
 import streamlit as st
 
 from core.constants import TEXT_EXTS, SUPPORTED_IMPORT_EXTS, FIELD_SCHEMA
-from core.db_manager import get_tags_registry, validate_session
+from core.db_manager import add_tag, get_tags_registry, validate_session
 from core.file_io import save_session_pending, save_session_final, import_folder_to_pending
 from components.forms import render_field_inputs
 from components.ai_analysis import render_ai_analysis
@@ -82,6 +82,24 @@ def _apply_analysis_to_upload_form(result: dict, upload_tags_key: str) -> None:
         st.session_state[upload_tags_key] = list(dict.fromkeys([*current, *suggested_tags]))
 
     st.rerun()
+
+
+def _consume_upload_prefill() -> tuple[bool, list[str]]:
+    prefill = st.session_state.get("upload_prefill")
+    if not isinstance(prefill, dict):
+        return False, []
+
+    description = str(prefill.get("description") or "")
+    topics = [
+        str(topic).strip()
+        for topic in (prefill.get("topics") or [])
+        if str(topic).strip()
+    ]
+    st.session_state["source_mode"] = "📝 粘贴文字"
+    paste_key = f"paste_{st.session_state.upload_key}"
+    st.session_state[paste_key] = description
+    st.session_state["upload_prefill"] = None
+    return prefill.get("source") == "planning", topics
 
 
 def _render_folder_import() -> None:
@@ -199,6 +217,11 @@ def _render_folder_import() -> None:
 
 
 def render_upload_tab() -> None:
+    show_planning_prefill, prefill_topics = _consume_upload_prefill()
+
+    if show_planning_prefill:
+        st.info("✍️ 已从今日规划预填内容，可继续扩充")
+
     source_mode = st.radio(
         "上传方式",
         ["📁 上传文件", "📝 粘贴文字", "📂 导入文件夹"],
@@ -270,7 +293,16 @@ def render_upload_tab() -> None:
 
     st.divider()
     st.markdown("**🏷️ 标签** **\\*（必填）**")
+    for topic in prefill_topics:
+        add_tag(topic)
     tag_options = get_tags_registry()
+    if prefill_topics:
+        matched_topics = [topic for topic in prefill_topics if topic in tag_options]
+        if matched_topics:
+            current_tags = st.session_state.get(upload_tags_key, [])
+            st.session_state[upload_tags_key] = list(
+                dict.fromkeys([*current_tags, *matched_topics])
+            )
     upload_tags = st.multiselect(
         "标签",
         options=tag_options,

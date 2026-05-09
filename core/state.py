@@ -12,6 +12,7 @@ def init_state() -> None:
         "active_sub_tab":       {},
         "_nav_target":          None,
         "upload_key":            0,
+        "upload_prefill":        None,
         "pending_selected":      None,
         "archived_selected":     None,
         "search_selected":       None,
@@ -54,6 +55,7 @@ def init_state() -> None:
         "planning_cal_date":      None,
         "planning_todo_adding":   False,
         "planning_activity_adding": False,
+        "planning_record_moment_date": None,
         "_reflection_open":       {},
         "_postpone_open":         {},
     }.items():

@@ -33,6 +33,11 @@ from core.db_manager import (
     update_annual_goal,
     update_calendar_todo,
 )
+from core.llm_client import call_llm
+from core.prompts import (
+    PLANNING_RECORD_MOMENT_SYSTEM,
+    PLANNING_RECORD_MOMENT_USER_TMPL,
+)
 
 
 PRIORITY_COLORS = {
@@ -345,7 +350,7 @@ def _render_calendar_todos() -> None:
 
     if selected_date:
         _render_selected_day_todos(display_todos)
-        _render_daily_activities(selected_date, display_activities)
+        _render_daily_activities(selected_date, display_activities, display_todos)
         return
 
     if not display_todos:
@@ -556,7 +561,9 @@ def _render_selected_day_todos(todos: list[dict]) -> None:
         _render_todo_row(todo)
 
 
-def _render_daily_activities(selected_date: str, activities: list[dict]) -> None:
+def _render_daily_activities(
+    selected_date: str, activities: list[dict], todos: list[dict]
+) -> None:
     st.markdown("#### 📝 今日事务")
     action_cols = st.columns([2, 4])
     with action_cols[0]:
@@ -578,6 +585,7 @@ def _render_daily_activities(selected_date: str, activities: list[dict]) -> None
         return
     for activity in activities:
         _render_activity_row(activity)
+    _render_record_moment_prompt(selected_date, activities, todos)
 
 
 def _render_activity_form(selected_date: str) -> None:
@@ -608,6 +616,7 @@ def _render_activity_form(selected_date: str) -> None:
                         int(duration),
                     )
                     st.session_state["planning_activity_adding"] = False
+                    st.session_state["planning_record_moment_date"] = selected_date
                     st.rerun()
                 else:
                     st.warning("事务描述为必填项")
@@ -615,6 +624,98 @@ def _render_activity_form(selected_date: str) -> None:
             if st.button("取消", key="af_cancel"):
                 st.session_state["planning_activity_adding"] = False
                 st.rerun()
+
+
+def _render_record_moment_prompt(
+    selected_date: str, activities: list[dict], todos: list[dict]
+) -> None:
+    if st.session_state.get("planning_record_moment_date") != selected_date:
+        return
+
+    with st.container(border=True):
+        st.markdown("📝 记录此刻的想法？")
+        go_col, no_col, _ = st.columns([1, 1, 4])
+        with go_col:
+            if st.button("去记录", key=f"record_moment_go_{selected_date}", type="primary"):
+                _go_record_moment(selected_date, activities, todos)
+        with no_col:
+            if st.button("不了", key=f"record_moment_no_{selected_date}"):
+                st.session_state["planning_record_moment_date"] = None
+                st.rerun()
+
+
+def _go_record_moment(
+    selected_date: str, activities: list[dict], todos: list[dict]
+) -> None:
+    model_id = st.session_state.get("llm_selected_model") or ""
+    if not model_id:
+        st.warning("请先在「系统」中选择一个 LLM 模型。")
+        return
+
+    user_prompt = PLANNING_RECORD_MOMENT_USER_TMPL.format(
+        date=selected_date,
+        activities=_format_activities_for_prompt(activities),
+        todos=_format_todos_for_prompt(todos),
+    )
+    try:
+        with st.spinner("正在整理今日记录草稿…"):
+            draft_text = call_llm(
+                PLANNING_RECORD_MOMENT_SYSTEM,
+                user_prompt,
+                model_id=model_id,
+                expect_json=False,
+                skill_name="planning_record_moment",
+            )
+    except Exception as exc:
+        st.error(f"草稿生成失败：{exc}")
+        return
+
+    st.session_state["upload_prefill"] = {
+        "description": str(draft_text).strip(),
+        "topics": _infer_activity_topics(activities),
+        "source": "planning",
+    }
+    st.session_state["planning_record_moment_date"] = None
+    st.session_state["_nav_target"] = ("📝 记录台", "⬆️ 上传")
+    st.rerun()
+
+
+def _format_activities_for_prompt(activities: list[dict]) -> str:
+    if not activities:
+        return "无"
+    lines = []
+    for activity in activities:
+        duration = int(activity.get("duration") or 0)
+        duration_text = f"，时长 {duration} 分钟" if duration > 0 else ""
+        lines.append(
+            f"- [{activity.get('category', '未分类')}] "
+            f"{activity.get('description', '').strip()}{duration_text}"
+        )
+    return "\n".join(lines)
+
+
+def _format_todos_for_prompt(todos: list[dict]) -> str:
+    if not todos:
+        return "无"
+    lines = []
+    for todo in todos:
+        status = "已完成" if todo.get("status") == "已完成" else "未完成"
+        reflection = str(todo.get("reflection") or "").strip()
+        reflection_text = f"，完成心得：{reflection}" if reflection else ""
+        lines.append(
+            f"- [{status}] [{todo.get('category', '未分类')}] "
+            f"{todo.get('content', '').strip()}{reflection_text}"
+        )
+    return "\n".join(lines)
+
+
+def _infer_activity_topics(activities: list[dict]) -> list[str]:
+    topics = []
+    for activity in activities:
+        category = str(activity.get("category") or "").strip()
+        if category and category not in topics:
+            topics.append(category)
+    return topics
 
 
 def _render_activity_row(activity: dict) -> None:
