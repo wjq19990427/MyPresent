@@ -1,4 +1,4 @@
-"""共用 UI 组件：卡片、详情面板、评论区、标签/分组管理、AI 摘要。"""
+"""共用 UI 组件：卡片、详情面板、评论区、标签/分组管理。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,15 +6,15 @@ from pathlib import Path
 import streamlit as st
 
 from core.constants import (
-    COLS, DEFAULT_TAGS, FIELD_SCHEMA,
+    COLS, FIELD_SCHEMA,
     VIDEO_EXTS, VIDEO_EXTS_PLAYABLE,
 )
 from core.db_manager import (
-    get_tags_registry, get_groups,
-    add_label, add_tag, remove_tag, create_group, delete_group,
+    get_groups,
+    add_label, remove_label, create_group, delete_group,
     get_label_registry,
     validate_session,
-    update_session_fields, add_comment, delete_comment,
+    update_session_fields, update_session_tags, add_comment, delete_comment,
     soft_delete_session,
     _is_text_session,
 )
@@ -181,37 +181,6 @@ def _render_comments(session: dict) -> None:
             st.warning("评论内容不能为空")
 
 
-# ─── AI 摘要 ──────────────────────────────────────────────────────────────────────
-
-def _render_ai_summary(session: dict) -> None:
-    """AI 摘要面板。"""
-    model_id = st.session_state.get("llm_selected_model") or ""
-    cache_key = f"_story_{session['session_id']}"
-
-    cached = st.session_state.get(cache_key)
-    with st.expander("✨ AI 摘要", expanded=bool(cached)):
-        if not model_id:
-            st.caption("请先在「运行看板」选择模型，即可生成此记忆的文学化摘要。")
-            return
-        if cached:
-            st.markdown(cached)
-            if st.button("🔄 重新生成", key=f"regen_story_{session['session_id']}"):
-                del st.session_state[cache_key]
-                st.rerun()
-        else:
-            if st.button(
-                "✨ 生成 AI 摘要", key=f"gen_story_{session['session_id']}", type="primary"
-            ):
-                from skills.story_skill import StorySkill
-                with st.spinner("生成中…"):
-                    result = StorySkill().run(session, model_id=model_id)
-                if result.success:
-                    st.session_state[cache_key] = result.data["story"]
-                    st.rerun()
-                else:
-                    st.error(f"生成失败：{result.error}")
-
-
 # ─── 详情 + 编辑表单 ──────────────────────────────────────────────────────────────
 
 def _render_detail(
@@ -286,7 +255,6 @@ def _render_detail(
     safe_sid         = "".join(c if c.isalnum() else "_" for c in sid)
     edit_prefix      = f"edit_{safe_sid}"
     skip_keys        = {"description"} if is_text else set()
-    tags_widget_key  = f"tags_{safe_sid}"
 
     text_file_path    = None
     current_text_body = ""
@@ -328,24 +296,12 @@ def _render_detail(
     if is_text:
         field_values["description"] = text_body
 
-    _render_ai_summary({**session, **field_values})
-
-    st.divider()
-    st.markdown("**🏷️ 标签**（可多选，不计入编辑历史）")
-    all_tags     = get_tags_registry()
-    extra_tags   = [t for t in session.get("tags", []) if t not in all_tags]
-    tag_options  = all_tags + extra_tags
-    merged_default = list(dict.fromkeys(
-        [t for t in session.get("tags", []) if t in tag_options]
-    ))
-    selected_tags = st.multiselect(
-        "标签",
-        options=tag_options,
-        default=merged_default,
-        key=tags_widget_key,
-        label_visibility="collapsed",
+    st.session_state.setdefault(f"{safe_sid}_summary", str(session.get("summary", "")))
+    field_values["summary"] = st.text_area(
+        "摘要",
+        key=f"{safe_sid}_summary",
+        height=90,
     )
-
     structured_values = _render_structured_detail_fields(session, safe_sid)
 
     groups = get_groups()
@@ -398,15 +354,11 @@ def _render_detail(
                 text_file_path.write_text(text_body, encoding="utf-8")
             except OSError as e:
                 st.error(f"文件写入失败：{e}")
-        # 将 AI 新生成、不在注册表中的标签自动注册
-        existing_reg = get_tags_registry()
-        for t in selected_tags:
-            if t not in existing_reg:
-                add_tag(t)
-        field_values["tags"]      = selected_tags
+        topics = _clean_list(structured_values.get("topics", []))
         field_values["group_ids"] = selected_gids
         field_values.update(structured_values)
         update_session_fields(sid, field_values)
+        update_session_tags(sid, topics)
         st.session_state[state_key] = sid
         st.rerun()
 
@@ -422,14 +374,11 @@ def _render_detail(
                 except OSError as e:
                     st.error(f"文件写入失败：{e}")
                     st.stop()
-            existing_reg = get_tags_registry()
-            for t in selected_tags:
-                if t not in existing_reg:
-                    add_tag(t)
-            field_values["tags"]      = selected_tags
+            topics = _clean_list(structured_values.get("topics", []))
             field_values["group_ids"] = selected_gids
             field_values.update(structured_values)
             update_session_fields(sid, field_values)
+            update_session_tags(sid, topics)
             move_to_final(sid)
             st.session_state[state_key] = None
             st.rerun()
@@ -482,14 +431,8 @@ def _render_structured_detail_fields(session: dict, safe_sid: str) -> dict:
             options=options,
             key=state_key,
         )
-    st.session_state.setdefault(f"{safe_sid}_summary", str(session.get("summary", "")))
     st.session_state.setdefault(
         f"{safe_sid}_emotion_note", str(session.get("emotion_note", ""))
-    )
-    values["summary"] = st.text_area(
-        "摘要",
-        key=f"{safe_sid}_summary",
-        height=90,
     )
     values["emotion_note"] = st.text_area(
         "情绪描述",
@@ -534,28 +477,47 @@ def _register_structured_labels(field: str, values: list[str]) -> None:
 
 # ─── 标签 / 分组 管理面板 ────────────────────────────────────────────────────────
 
-def _render_tag_manager() -> None:
-    tags = get_tags_registry()
-    for tag in tags:
-        c_name, c_del = st.columns([5, 1])
-        with c_name:
-            st.markdown(f"🏷️ {tag}")
-        with c_del:
-            if tag in DEFAULT_TAGS:
-                st.caption("默认")
-            elif st.button("🗑️", key=f"del_tag_{tag}", help=f"删除「{tag}」"):
-                remove_tag(tag)
-                st.rerun()
-    st.divider()
-    new_tag = st.text_input("新标签名", key="new_tag_input", placeholder="输入后点添加")
-    if st.button("➕ 添加标签", key="add_tag_btn"):
-        if new_tag.strip():
-            add_tag(new_tag)
-            if "new_tag_input" in st.session_state:
-                del st.session_state["new_tag_input"]
-            st.rerun()
-        else:
-            st.warning("标签名不能为空")
+def _render_label_manager() -> None:
+    tabs = st.tabs(["领域", "视角", "话题", "情绪"])
+    for tab, (field, label) in zip(tabs, _STRUCTURED_LABELS.items()):
+        label_type = _STRUCTURED_LABEL_TYPES[field]
+        with tab:
+            labels = get_label_registry(label_type)
+            if labels:
+                for item in labels:
+                    name = item["name"]
+                    c_name, c_del = st.columns([5, 1])
+                    with c_name:
+                        st.markdown(f"🏷️ {name}")
+                    with c_del:
+                        if item.get("is_system"):
+                            st.caption("🔒 系统")
+                        elif st.button(
+                            "🗑️",
+                            key=f"del_label_{label_type}_{name}",
+                            help=f"删除「{name}」",
+                        ):
+                            remove_label(name, label_type)
+                            st.rerun()
+                st.divider()
+            else:
+                st.caption(f"暂无{label}")
+                st.divider()
+
+            input_key = f"new_label_input_{label_type}"
+            new_label = st.text_input(
+                f"新{label}标签名",
+                key=input_key,
+                placeholder="输入后点添加",
+            )
+            if st.button(f"➕ 添加{label}", key=f"add_label_btn_{label_type}"):
+                if new_label.strip():
+                    add_label(new_label, label_type)
+                    if input_key in st.session_state:
+                        del st.session_state[input_key]
+                    st.rerun()
+                else:
+                    st.warning("标签名不能为空")
 
 
 def _render_group_manager() -> None:
