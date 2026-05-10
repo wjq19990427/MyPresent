@@ -135,7 +135,15 @@ def _render_batch_row(session: dict, selected_key: str = "batch_selected_ids") -
         st.caption(session.get("upload_time", ""))
     with cols[3]:
         tags = session.get("tags", [])
-        st.caption(" · ".join(tags[:5]) if tags else "无标签")
+        group_ids = session.get("group_ids", [])
+        if tags:
+            st.caption(" · ".join(tags[:5]))
+        else:
+            st.caption("无标签")
+        if group_ids:
+            group_map = {g["id"]: g["name"] for g in get_groups()}
+            names = [group_map.get(gid, gid) for gid in group_ids[:3]]
+            st.caption("📁 " + " · ".join(names))
 
 
 # ─── 评论区 ──────────────────────────────────────────────────────────────────────

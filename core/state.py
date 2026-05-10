@@ -28,6 +28,8 @@ def init_state() -> None:
         "archived_type_filter":  "全部",
         "archived_tag_filter":   [],
         "archived_group_filter": None,
+        "archived_view_mode":    "all",
+        "archived_group_selected": None,
         "folder_selected_path":  "",
         "folder_scan_results":   [],
         "folder_scan_skipped_n": 0,
