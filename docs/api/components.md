@@ -62,7 +62,7 @@
 - **入参**：
   - `session`：完整 session dict
   - `selected_key`：保存已选 session_id 集合的 `session_state` 键
-- **副作用**：渲染批量管理行（checkbox + 缩略图 + 摘要 + 标签）；勾选变化时写 `st.session_state[selected_key]` 并 `st.rerun()`
+- **副作用**：渲染批量管理行（checkbox + 缩略图 + 摘要 + 标签/分组摘要）；勾选变化时写 `st.session_state[selected_key]` 并 `st.rerun()`
 
 ### `_render_detail(session, mode, state_key=None) -> None`
 - **入参**：`mode = "pending" | "final"`；`state_key` 默认按 mode 推导（搜索 Tab 显式传 `search_selected`）
@@ -201,15 +201,23 @@
 
 ## tab_archived.py
 
-> 「已归档」Tab。分组导航 + 类型 / 结构化标签三维过滤 + 编辑入口 + 结构化标签库&分组管理。
+> 「已归档」Tab。全部筛选视图 + 分组相册视图 + 编辑入口 + 结构化标签库&分组管理。
 
 ### `render_archived_tab() -> None`
 - **依赖 session_state**：
+  - 视图态：`archived_view_mode`（`"all"` / `"groups"`）/ `archived_group_selected`
   - 过滤态：`archived_type_filter` / `archived_group_filter` / `archived_domain_filter` / `archived_topic_filter` / `archived_emotion_filter`
   - 选中态：`archived_selected`
 - **依赖**：`cards._render_card` / `_render_detail` / `_render_label_manager` / `_render_group_manager`
-- **批量模式**：`batch_mode_archived=True` 时改用 `_render_batch_row`，支持批量软删除 / 取消选择；不再提供旧 flat tags 批量添加
-- **结构化筛选**：领域、话题、情绪三行筛选，默认全选；同一维度内 OR，跨维度 AND；全部勾选等同于不筛选
+- **顶部切换**：「📋 全部」保留现有筛选 + 网格 + 批量操作；「📁 分组」进入相册格浏览
+- **全部模式批量**：`batch_mode_archived=True` 时改用 `_render_batch_row`，支持批量软删除 / 加入分组 / 取消选择；加入分组通过 `update_session_groups()` 逐条合并目标 group id
+- **分组模式**：
+  - 分组列表支持新建分组；每格展示封面缩略图（第一条 final 记录首个图片/视频缩略图）或首字占位、分组名、记录数、改名、删除
+  - 删除分组调用 `delete_group()`，仅删除分组与记录关联，不删除 session
+  - 改名不新增 DB API：创建新分组、迁移原分组关联到新 id、删除旧分组
+  - 点击分组进入详情，仅按 `load_db()` 返回的 `group_ids` 过滤该组全部 final 记录，不渲染维度筛选
+  - 分组详情批量模式支持软删除 / 移出分组 / 取消选择；移出分组调用 `update_session_groups()`
+- **结构化筛选**：仅全部模式渲染；领域、话题、情绪三行筛选，默认全选；同一维度内 OR，跨维度 AND；全部勾选等同于不筛选
 
 ### 过滤优先级（AND 链）
 
