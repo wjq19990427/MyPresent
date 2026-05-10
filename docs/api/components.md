@@ -51,6 +51,11 @@
   - `session`：完整 session dict
   - `state_key`：选中态键名（`pending_selected` / `archived_selected` / `search_selected`）
   - `score: float | None`：显示「🎯 相似度 XX%」徽章
+- **展示内容**：标题、`content_time`（为空不显示）、记录类型角标、结构化标签 badge、文件数/评论数/相似度
+- **标题规则**：优先 `session["title"]`；为空时截取 `description` 前 30 字；仍为空显示「（未命名）」
+- **记录类型**：`_infer_record_type(session)` 根据 `source_type` 与文件扩展名推断 `text/image/video/mixed/file`；无文件时回落到 `source_type`
+- **结构化标签**：卡片只展示 `domains/attributes/topics`，最多 6 个，超出显示 `+N`；不展示 `emotion_tags`
+- **旧字段限制**：卡片不再展示 `upload_time`、完整度 badge、旧 `tags/session_tags`
 - **副作用**：渲染缩略图 + 元信息 + 切换按钮；点击按钮写 `st.session_state[state_key]` + `st.rerun()`
 
 ### `_render_batch_row(session, selected_key="batch_selected_ids") -> None`

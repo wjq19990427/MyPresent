@@ -1,12 +1,14 @@
 """共用 UI 组件：卡片、详情面板、评论区、标签/分组管理。"""
 from __future__ import annotations
 
+from collections import Counter
+from html import escape
 from pathlib import Path
 
 import streamlit as st
 
 from core.constants import (
-    COLS, FIELD_SCHEMA,
+    COLS, FIELD_SCHEMA, IMAGE_EXTS, TEXT_EXTS,
     VIDEO_EXTS, VIDEO_EXTS_PLAYABLE,
 )
 from core.db_manager import (
@@ -35,6 +37,18 @@ _STRUCTURED_LABELS = {
     "attributes": "视角",
     "topics": "话题",
     "emotion_tags": "情绪",
+}
+_CARD_LABEL_COLORS = {
+    "domains": ("#eff6ff", "#1d4ed8", "#bfdbfe"),
+    "attributes": ("#f0fdf4", "#15803d", "#bbf7d0"),
+    "topics": ("#fff7ed", "#c2410c", "#fed7aa"),
+}
+_RECORD_TYPE_BADGES = {
+    "text": "📝 纯文本",
+    "image": "📷 图片",
+    "video": "🎬 视频",
+    "mixed": "🧩 混合",
+    "file": "📎 文件",
 }
 
 
@@ -65,41 +79,132 @@ def _completion_badge(session: dict) -> str:
 def _render_card(
     col, session: dict, state_key: str, score: float | None = None
 ) -> None:
-    sid     = session["session_id"]
-    is_sel  = st.session_state.get(state_key) == sid
-    thumb   = _session_thumb(session)
+    sid = session["session_id"]
+    is_sel = st.session_state.get(state_key) == sid
+    thumb = _session_thumb(session)
     n_files = len(session.get("files", []))
-    n_cmts  = len([c for c in session.get("comments", []) if isinstance(c, dict)])
+    n_cmts = len([c for c in session.get("comments", []) if isinstance(c, dict)])
+    record_type = _infer_record_type(session)
+    title = _card_title(session)
+    content_time = str(session.get("content_time") or "").strip()
 
     with col:
         if thumb:
             st.image(thumb, use_container_width=True)
-        elif session.get("source_type") == "text":
-            st.markdown("📄 **文本记录**")
+        elif record_type == "text":
+            st.markdown("📝 **文本记录**")
             try:
                 fp = Path(session["files"][0]["path"])
                 st.caption(fp.read_text(encoding="utf-8")[:50].replace("\n", " ") + "…")
-            except OSError:
+            except (IndexError, KeyError, OSError):
                 pass
         else:
-            st.markdown("📎 **文件记录**")
+            st.markdown("📄 **文件记录**")
 
+        c_title, c_type = st.columns([4, 1.4])
+        with c_title:
+            st.markdown(f"**{escape(title)}**")
+        with c_type:
+            st.markdown(_record_type_badge(record_type), unsafe_allow_html=True)
+
+        if content_time:
+            st.caption(f"记录时间：{content_time}")
         if n_files > 1:
-            st.caption(f"📎 共 {n_files} 个文件")
+            st.caption(f"📎 {n_files} 个文件")
         if n_cmts:
             st.caption(f"💬 {n_cmts} 条评论")
         if score is not None:
             st.caption(f"🎯 相似度 {score:.0%}")
-        st.caption(f"🕐 {session.get('upload_time', '')}")
-        st.caption(_completion_badge(session))
-        tags = session.get("tags", [])
-        if tags:
-            st.caption("🏷️ " + "  ".join(tags))
+
+        badges = _structured_card_badges(session)
+        if badges:
+            st.markdown(badges, unsafe_allow_html=True)
 
         label = "✅ 已选" if is_sel else "🔍 查看 / 编辑"
         if st.button(label, key=f"{state_key}_btn_{sid}", use_container_width=True):
             st.session_state[state_key] = None if is_sel else sid
             st.rerun()
+
+
+def _infer_record_type(session: dict) -> str:
+    files = session.get("files") or []
+    if session.get("source_type") == "text":
+        return "text"
+    if not files:
+        source_type = str(session.get("source_type") or "").lower()
+        return source_type if source_type in _RECORD_TYPE_BADGES else "file"
+
+    types = []
+    for file_entry in files:
+        ext = Path(
+            str(file_entry.get("filename") or file_entry.get("path") or "")
+        ).suffix.lower()
+        if ext in TEXT_EXTS:
+            types.append("text")
+        elif ext in IMAGE_EXTS:
+            types.append("image")
+        elif ext in VIDEO_EXTS:
+            types.append("video")
+        else:
+            types.append("file")
+
+    non_file_types = [item for item in types if item != "file"]
+    if non_file_types and len(set(non_file_types)) > 1:
+        return "mixed"
+    if non_file_types:
+        return Counter(non_file_types).most_common(1)[0][0]
+    return "file"
+
+
+def _card_title(session: dict) -> str:
+    title = str(session.get("title") or "").strip()
+    if title:
+        return title
+    description = str(session.get("description") or "").strip().replace("\n", " ")
+    if description:
+        return description[:30] + ("…" if len(description) > 30 else "")
+    return "（未命名）"
+
+
+def _record_type_badge(record_type: str) -> str:
+    text = escape(_RECORD_TYPE_BADGES.get(record_type, _RECORD_TYPE_BADGES["file"]))
+    return (
+        "<span style='display:inline-block;padding:2px 7px;border-radius:999px;"
+        "font-size:12px;line-height:1.6;background:#f3f4f6;color:#374151;"
+        f"border:1px solid #e5e7eb;white-space:nowrap;'>{text}</span>"
+    )
+
+
+def _structured_card_badges(session: dict) -> str:
+    items: list[tuple[str, str]] = []
+    for field in ("domains", "attributes", "topics"):
+        items.extend((field, value) for value in _clean_list(session.get(field, [])))
+
+    visible = items[:6]
+    hidden_count = max(0, len(items) - len(visible))
+    badges = [_label_badge(field, value) for field, value in visible]
+    if hidden_count:
+        badges.append(_count_badge(hidden_count))
+    return " ".join(badges)
+
+
+def _label_badge(field: str, value: str) -> str:
+    bg, fg, border = _CARD_LABEL_COLORS[field]
+    return (
+        "<span style='display:inline-block;margin:2px 4px 2px 0;padding:2px 7px;"
+        "border-radius:999px;font-size:12px;line-height:1.6;"
+        f"background:{bg};color:{fg};border:1px solid {border};'>"
+        f"{escape(value)}</span>"
+    )
+
+
+def _count_badge(count: int) -> str:
+    return (
+        "<span style='display:inline-block;margin:2px 4px 2px 0;padding:2px 7px;"
+        "border-radius:999px;font-size:12px;line-height:1.6;"
+        "background:#f3f4f6;color:#4b5563;border:1px solid #e5e7eb;'>"
+        f"+{count}</span>"
+    )
 
 
 def _render_batch_row(session: dict, selected_key: str = "batch_selected_ids") -> None:
