@@ -12,7 +12,7 @@
 
 | 文件 | 职责 | 契约状态 |
 |------|------|----------|
-| `cards.py` | 共用卡片 / 详情 / 评论 / 标签&分组管理 / AI 摘要 | ✅ |
+| `cards.py` | 共用卡片 / 详情 / 评论 / 结构化标签&分组管理 | ✅ |
 | `forms.py` | 表单字段（基于 `FIELD_SCHEMA` 动态渲染） | ✅ |
 | `tab_upload.py` | 「记录舱」Tab | ✅ |
 | `tab_gallery.py` | 「灵感墙」Tab | ✅ |
@@ -67,19 +67,18 @@
   - 删除按钮 → `soft_delete_session(sid)`，清空选中态并关闭详情面板
   - 纯文字 session 直接重写源 .txt 文件
   - AI 分析产生的新结构化标签在采纳时通过 `add_label` 自动入库
-- **依赖组件**：`forms.render_field_inputs` / `ai_analysis.render_session_ai_analysis` / `_render_ai_summary` / `_render_comments`
+- **依赖组件**：`forms.render_field_inputs` / `ai_analysis.render_session_ai_analysis` / `_render_comments`
 - **已知陷阱**：widget key 用 `safe_sid = "".join(c if c.isalnum() else "_" for c in sid)` 净化，避免 streamlit 对特殊字符报错
-- **AI 功能位置**：统一 AI 分析在字段编辑区上方，pending/final 均可用；采纳后写入标题、摘要、结构化标签、情绪说明、感受与原因；AI 摘要在字段区下方
+- **AI 功能位置**：统一 AI 分析在字段编辑区上方，pending/final 均可用；采纳后写入标题、摘要、结构化标签、情绪说明、感受与原因；详情页不再提供 StorySkill 摘要入口
 - **保存控件**：详情页使用普通 `st.button` 即时按钮，不再用 `st.form`，避免 AI 组件写入 widget state 后前端不刷新
 
 ### `_render_comments(session) -> None`
 - **必须**在 `st.form` 外调用（依赖 `st.button` 即时回写）
 
-### `_render_ai_summary(session) -> None`
-- pending/final 详情页均可用；缓存 key = `_story_{session_id}`，依赖全局 `llm_selected_model`
-
-### `_render_tag_manager() -> None` / `_render_group_manager() -> None`
-- 标签：禁删 `DEFAULT_TAGS`
+### `_render_label_manager() -> None` / `_render_group_manager() -> None`
+- 标签库：使用四维 `label_registry`，sub-tab 为领域 / 视角 / 话题 / 情绪
+- 标签新增：调用 `add_label(name, type)`；空名称由 UI 拦截
+- 标签删除：仅用户自定义标签显示删除按钮，调用 `remove_label(name, type)`；系统标签只显示 `🔒 系统`
 - 分组：删分组同步清 `archived_group_filter`
 
 ### 内部辅助
@@ -123,8 +122,8 @@
 ### `render_upload_tab() -> None`
 - **副作用**：归档调 `save_session_final`；暂存调 `save_session_pending`；文件夹模式调 `import_folder_to_pending`
 - **依赖 session_state**：`upload_key`（计数器，提交后 +1，触发 `file_uploader` 重置）/ `upload_prefill`（规划台跳转预填数据，消费后清空）
-- **预填行为**：若 `upload_prefill` 存在，上传页切换到「📝 粘贴文字」，显示 `st.info("✍️ 已从今日规划预填内容，可继续扩充")`，将 `description` 写入粘贴文本框，将 `topics` 补入标签注册表并默认选中，然后立即清空 `upload_prefill`
-- **AI 分析保存**：上传页的统一 AI 分析结果会写入上传表单与结构化标签控件；保存/归档时透传 `domains/attributes/topics/emotion_tags/emotion_note/summary`
+- **预填行为**：若 `upload_prefill` 存在，上传页切换到「📝 粘贴文字」，显示 `st.info("✍️ 已从今日规划预填内容，可继续扩充")`，将 `description` 写入粘贴文本框，将 `topics` 补入结构化话题标签并默认选中，然后立即清空 `upload_prefill`
+- **AI 分析保存**：上传页的统一 AI 分析结果会写入上传表单与结构化标签控件；保存/归档时透传 `domains/attributes/topics/emotion_tags/emotion_note/summary`，并以 `topics` 作为 `tags` 参数桥接旧 `session_tags`
 
 ### 内部子组件
 
@@ -135,14 +134,14 @@
 
 ### 强制约束
 
-- **标签必填**：归档 / 暂存前校验 `upload_tags` 非空
+- 不再渲染旧 `upload_tags` multiselect，也不再要求旧标签必填；归档仍校验 `validate_session`，暂存只警告缺失必填字段
 - 归档前必校验 `validate_session`，缺必填字段拒绝放行（暂存时仅警告不阻断）
 - 文件夹模式 `field_values={}` 且不传默认标签——直接以空字段暂存到 pending
 
 ### 已知陷阱
 
 - `upload_key` 自增是 streamlit 重置 file_uploader 的标准技巧——勿删
-- 上传时统一 AI 分析面板在标签 multiselect 前渲染；应用结果通过返回值交给 `tab_upload.py` 写入上传表单 state
+- 上传页布局顺序为 AI 分析面板、必填信息、结构化标签、摘要、操作按钮；应用结果通过返回值交给 `tab_upload.py` 写入上传表单 state
 - 上传文件 / 粘贴文字模式渲染统一 AI 分析组件；组件返回采纳结果后，由本 Tab 写入 `upload_title` / `upload_summary` / `upload_feeling` / `upload_reason` 等表单 widget state
 - 文件夹导入路径保存在 `folder_selected_path`；切换路径时清空 `folder_scan_results`
 - 文件夹扫描会按原始文件名排除已上传文件，并把跳过数量写入 `folder_scan_skipped_n`
@@ -160,10 +159,10 @@
   - `state_key`：调用方提供的状态命名空间，默认 `"upload"`
 - **行为**：
   - 初始显示「✨ AI 分析」按钮；点击后调用 `AnalysisSkill().execute_draft(draft, model_id, fields="all")`
-  - 结果面板按字段展示标题、摘要、领域、视角、话题、情绪、情绪描述、感受、原因
+  - 结果面板按字段展示标题、摘要、领域、视角、话题、情绪、情绪描述、感受、原因；领域/视角/话题/情绪使用 badge 展示
   - 每个字段支持「↺ 重生成」展开三级 hint：无 hint 再试一次、字段预设快捷 hint、自定义 hint
   - 局部重生成只调用对应字段并合并回缓存，不清空其他字段
-  - 支持「全部采纳」与逐项勾选后「采纳勾选项」
+  - 支持「全部采纳」与逐项勾选后「采纳勾选项」；`new_topics` 合并到话题行内显示，并标注为新标签
 - **返回**：用户采纳后返回已选字段 dict；未操作时返回 `None`
 - **副作用**：读写 `st.session_state` 的 `_analysis_result_{state_key}` / `_analysis_field_states_{state_key}` / `_analysis_apply_payload_{state_key}`；不直接写 DB，不直接写上传表单 widget
 - **约束**：不得替代 `tab_upload.py` 做入库；调用方负责把返回值写入表单或标签控件
@@ -197,24 +196,24 @@
 
 ## tab_archived.py
 
-> 「已归档」Tab。分组导航 + 类型 / 标签 / 无标签过滤 + 编辑入口 + 标签&分组管理。
+> 「已归档」Tab。分组导航 + 类型 / 结构化标签三维过滤 + 编辑入口 + 结构化标签库&分组管理。
 
 ### `render_archived_tab() -> None`
 - **依赖 session_state**：
-  - 过滤态：`archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`
+  - 过滤态：`archived_type_filter` / `archived_group_filter` / `archived_domain_filter` / `archived_topic_filter` / `archived_emotion_filter`
   - 选中态：`archived_selected`
-- **依赖**：`cards._render_card` / `_render_detail` / `_render_tag_manager` / `_render_group_manager`
-- **批量模式**：`batch_mode_archived=True` 时改用 `_render_batch_row`，支持批量软删除 / 批量加标签 / 取消选择
+- **依赖**：`cards._render_card` / `_render_detail` / `_render_label_manager` / `_render_group_manager`
+- **批量模式**：`batch_mode_archived=True` 时改用 `_render_batch_row`，支持批量软删除 / 取消选择；不再提供旧 flat tags 批量添加
+- **结构化筛选**：领域、话题、情绪三行筛选，默认全选；同一维度内 OR，跨维度 AND；全部勾选等同于不筛选
 
 ### 过滤优先级（AND 链）
 
 ```
-status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]无标签独占
+status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR → 情绪OR
 ```
 
 ### 已知陷阱
 
-- `_show_no_tag_only` 与 `archived_tag_filter` 互斥：开启前者会显式清空后者
 - 选中条目若被新过滤条件排除，自动清 `archived_selected`，防止显示已不可见的详情
 
 ---
@@ -398,7 +397,7 @@ status==final → 分组(AND) → 文件类型(AND) → 标签 OR → [可选]�
 ### 已知陷阱
 
 - 与 `cards._render_detail` 是**紧耦合**：`apply_key` 必须等于目标标签 multiselect 的 widget key，否则前端无法自动勾选
-- 应用按钮按下时即调 `add_tag` 入库；`cards._render_detail` 的入库循环作为 belt-and-suspenders 兼职捕获 session 历史孤儿标签
+- 应用按钮按下时即调 `add_tag` 入库；该组件仅保留给旧 flat tags UI 路径使用
 
 ## ai_fill.py
 

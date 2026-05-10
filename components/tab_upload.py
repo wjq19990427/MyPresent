@@ -8,9 +8,7 @@ import streamlit as st
 from core.constants import TEXT_EXTS, SUPPORTED_IMPORT_EXTS, FIELD_SCHEMA
 from core.db_manager import (
     add_label,
-    add_tag,
     get_label_registry,
-    get_tags_registry,
     validate_session,
 )
 from core.file_io import save_session_pending, save_session_final, import_folder_to_pending
@@ -82,7 +80,7 @@ def _build_upload_draft(description: str) -> dict:
     return draft
 
 
-def _apply_analysis_to_upload_form(result: dict, upload_tags_key: str) -> None:
+def _apply_analysis_to_upload_form(result: dict) -> None:
     for key in ("title", "summary", "feeling", "reason"):
         if key in result:
             st.session_state[f"upload_{key}"] = result.get(key, "")
@@ -96,15 +94,6 @@ def _apply_analysis_to_upload_form(result: dict, upload_tags_key: str) -> None:
 
     if "emotion_note" in result:
         st.session_state["upload_emotion_note"] = str(result.get("emotion_note") or "")
-
-    suggested_tags = []
-    suggested_tags.extend(_clean_list(result.get("topics", [])))
-    suggested_tags.extend(_clean_list(result.get("new_topics", [])))
-    if suggested_tags:
-        for tag in suggested_tags:
-            add_tag(tag)
-        current = st.session_state.get(upload_tags_key, [])
-        st.session_state[upload_tags_key] = list(dict.fromkeys([*current, *suggested_tags]))
 
     st.rerun()
 
@@ -135,13 +124,10 @@ def _render_structured_analysis_fields() -> dict:
         st.session_state.setdefault(f"upload_{field}", [])
         options = _structured_options(field)
         values[field] = st.multiselect(label, options=options, key=f"upload_{field}")
-    st.session_state.setdefault("upload_summary", "")
     st.session_state.setdefault("upload_emotion_note", "")
-    summary = st.text_area("摘要", key="upload_summary", height=90)
     emotion_note = st.text_area("情绪描述", key="upload_emotion_note", height=90)
     return {
         **values,
-        "summary": summary,
         "emotion_note": emotion_note,
     }
 
@@ -336,7 +322,6 @@ def render_upload_tab() -> None:
 
     skip = {"description"} if is_text_content else set()
 
-    upload_tags_key = f"upload_tags_{st.session_state.upload_key}"
     model_id = st.session_state.get("llm_selected_model") or ""
     draft_for_ai = _build_upload_draft(auto_description)
     analysis_result = render_ai_analysis(
@@ -345,48 +330,42 @@ def render_upload_tab() -> None:
         state_key=f"upload_{st.session_state.upload_key}",
     )
     if analysis_result:
-        _apply_analysis_to_upload_form(analysis_result, upload_tags_key)
+        _apply_analysis_to_upload_form(analysis_result)
 
-    st.divider()
-    st.markdown("**🏷️ 标签** **\\*（必填）**")
     for topic in prefill_topics:
-        add_tag(topic)
-    tag_options = get_tags_registry()
+        _register_structured_labels("topics", [topic])
     if prefill_topics:
-        matched_topics = [topic for topic in prefill_topics if topic in tag_options]
-        if matched_topics:
-            current_tags = st.session_state.get(upload_tags_key, [])
-            st.session_state[upload_tags_key] = list(
-                dict.fromkeys([*current_tags, *matched_topics])
-            )
-    upload_tags = st.multiselect(
-        "标签",
-        options=tag_options,
-        default=[
-            t for t in st.session_state.get(upload_tags_key, []) if t in tag_options
-        ],
-        key=upload_tags_key,
-        label_visibility="collapsed",
-        placeholder="至少选择一个标签",
-    )
-    structured_values = _render_structured_analysis_fields()
+        current_topics = st.session_state.get("upload_topics", [])
+        st.session_state["upload_topics"] = list(
+            dict.fromkeys([*current_topics, *prefill_topics])
+        )
 
     with st.form("upload_meta_form"):
-        st.markdown("### 📋 填写记录信息")
+        st.markdown("### 必填信息")
         if is_text_content:
-            st.caption("💡 描述已自动使用内容填充，无需手动填写")
+            st.caption("描述已自动使用内容填充，无需手动填写")
         field_values = render_field_inputs("upload", skip_keys=skip)
         if is_text_content:
             field_values["description"] = auto_description
         st.divider()
+        structured_values = _render_structured_analysis_fields()
+        st.divider()
+        st.markdown("### 摘要")
+        st.session_state.setdefault("upload_summary", "")
+        structured_values["summary"] = st.text_area(
+            "摘要",
+            key="upload_summary",
+            height=90,
+        )
+        st.divider()
         c1, c2 = st.columns(2)
         with c1:
             do_archive = st.form_submit_button(
-                "✅ 完成并归档", type="primary", use_container_width=True
+                "完成并归档", type="primary", use_container_width=True
             )
         with c2:
             do_pending = st.form_submit_button(
-                "📦 暂存到待处理", use_container_width=True
+                "暂存到待处理", use_container_width=True
             )
 
     if source_mode == "📁 上传文件":
@@ -397,48 +376,42 @@ def render_upload_tab() -> None:
         src_type  = "text"
 
     if do_archive:
-        if not upload_tags:
-            st.error("❌ 请至少选择一个**标签**后再归档。")
-        else:
-            missing = validate_session(
-                {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
+        missing = validate_session(
+            {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
+        )
+        if missing:
+            st.error(
+                f"以下必填项未填写：**{'、'.join(missing)}**\n\n"
+                "请补充后归档，或点「暂存到待处理」先保存。"
             )
-            if missing:
-                st.error(
-                    f"❌ 以下必填项未填写：**{'、'.join(missing)}**\n\n"
-                    "请补充后归档，或点「暂存到待处理」先保存。"
-                )
-            else:
-                save_session_final(
-                    file_data,
-                    src_type,
-                    field_values,
-                    tags=upload_tags,
-                    **structured_values,
-                )
-                st.session_state.upload_key += 1
-                st.rerun()
-
-    if do_pending:
-        if not upload_tags:
-            st.error("❌ 请至少选择一个**标签**后再保存。")
         else:
-            save_session_pending(
+            save_session_final(
                 file_data,
                 src_type,
                 field_values,
-                tags=upload_tags,
+                tags=_clean_list(structured_values.get("topics", [])),
                 **structured_values,
             )
-            missing = validate_session(
-                {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
-            )
-            if missing:
-                st.warning(
-                    f"📦 已暂存！缺少必填项：**{'、'.join(missing)}**\n\n"
-                    "请到「灵感墙」补充完整后再归档。"
-                )
-            else:
-                st.success("📦 已暂存！信息完整，也可在「灵感墙」直接归档。")
             st.session_state.upload_key += 1
             st.rerun()
+
+    if do_pending:
+        save_session_pending(
+            file_data,
+            src_type,
+            field_values,
+            tags=_clean_list(structured_values.get("topics", [])),
+            **structured_values,
+        )
+        missing = validate_session(
+            {f["key"]: str(field_values.get(f["key"], "")).strip() for f in FIELD_SCHEMA}
+        )
+        if missing:
+            st.warning(
+                f"已暂存！缺少必填项：**{'、'.join(missing)}**\n\n"
+                "请到「灵感墙」补充完整后再归档。"
+            )
+        else:
+            st.success("已暂存！信息完整，也可在「灵感墙」直接归档。")
+        st.session_state.upload_key += 1
+        st.rerun()

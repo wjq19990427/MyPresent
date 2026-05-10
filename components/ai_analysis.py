@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from html import escape
 
 import streamlit as st
 
+from core.db_manager import get_label_registry
 from skills.analysis_skill import AnalysisSkill
 
 
@@ -34,6 +36,12 @@ _FIELD_ORDER = [
     "feeling",
     "reason",
 ]
+_TAG_FIELDS = {
+    "domains": "domain",
+    "attributes": "attribute",
+    "topics": "topic",
+    "emotion_tags": "emotion",
+}
 _HINTS = {
     "title": ["太长", "太正式", "太模糊", "换个角度"],
     "domains": ["分类不对", "太宽泛", "换个方向"],
@@ -110,8 +118,6 @@ def _render_analysis_panel(
             _render_field_row(
                 field, result, source_type, source, model_id, state_key, keys
             )
-        if result.get("new_topics"):
-            st.caption(f"建议新增话题：{_format_value(result['new_topics'])}")
 
         st.divider()
         col_all, col_selected = st.columns(2)
@@ -175,7 +181,10 @@ def _render_field_row(
             )
         with col_body:
             st.markdown(f"**{_FIELD_LABELS[field]}**")
-            st.write(_format_value(result.get(field)))
+            if field in _TAG_FIELDS:
+                st.markdown(_format_badges(field, result), unsafe_allow_html=True)
+            else:
+                st.write(_format_value(result.get(field)))
         with col_retry:
             if st.button("↺ 重生成", key=f"analysis_retry_open_{state_key}_{field}"):
                 states[f"{field}_retry_open"] = not states.get(
@@ -300,3 +309,49 @@ def _format_value(value) -> str:
     if value is None:
         return "（空）"
     return str(value).strip() or "（空）"
+
+
+def _format_badges(field: str, result: dict) -> str:
+    values = _clean_list(result.get(field))
+    new_values: set[str] = set()
+    if field == "topics":
+        extra_topics = _clean_list(result.get("new_topics"))
+        values = list(dict.fromkeys([*values, *extra_topics]))
+        new_values.update(extra_topics)
+
+    if not values:
+        return "<span style='color:#6b7280;'>（空）</span>"
+
+    existing = {
+        item["name"]
+        for item in get_label_registry(_TAG_FIELDS[field])
+    }
+    return " ".join(
+        _badge_html(value, is_new=value in new_values or value not in existing)
+        for value in values
+    )
+
+
+def _badge_html(value: str, *, is_new: bool) -> str:
+    text = escape(value)
+    if is_new:
+        text = f"✨ {text}（新）"
+        bg, fg, border = "#fff7ed", "#9a3412", "#fdba74"
+    else:
+        bg, fg, border = "#eef2ff", "#3730a3", "#c7d2fe"
+    return (
+        "<span style='display:inline-block;margin:2px 6px 2px 0;"
+        "padding:3px 8px;border-radius:999px;font-size:12px;"
+        f"line-height:1.6;background:{bg};color:{fg};border:1px solid {border};'>"
+        f"{text}</span>"
+    )
+
+
+def _clean_list(value) -> list[str]:
+    if isinstance(value, list):
+        items = value
+    elif value in (None, ""):
+        items = []
+    else:
+        items = [value]
+    return [str(item).strip() for item in items if str(item).strip()]
