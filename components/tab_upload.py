@@ -90,7 +90,6 @@ def _apply_analysis_to_upload_form(result: dict) -> None:
         if key == "topics":
             values = list(dict.fromkeys([*values, *_clean_list(result.get("new_topics", []))]))
         st.session_state[f"upload_{key}"] = values
-        _register_structured_labels(key, values)
 
     if "emotion_note" in result:
         st.session_state["upload_emotion_note"] = str(result.get("emotion_note") or "")
@@ -108,12 +107,20 @@ def _clean_list(value) -> list[str]:
     return [str(item).strip() for item in items if str(item).strip()]
 
 
-def _register_structured_labels(field: str, values: list[str]) -> None:
+def _persist_new_structured_labels(field: str, values: list[str]) -> None:
     label_type = _STRUCTURED_LABEL_TYPES.get(field)
     if not label_type:
         return
+    existing = {item["name"] for item in get_label_registry(label_type)}
     for value in values:
-        add_label(value, label_type)
+        if value not in existing:
+            add_label(value, label_type)
+            existing.add(value)
+
+
+def _persist_selected_structured_labels(values: dict) -> None:
+    for field in _STRUCTURED_LABEL_TYPES:
+        _persist_new_structured_labels(field, _clean_list(values.get(field, [])))
 
 
 def _render_structured_analysis_fields() -> dict:
@@ -332,8 +339,6 @@ def render_upload_tab() -> None:
     if analysis_result:
         _apply_analysis_to_upload_form(analysis_result)
 
-    for topic in prefill_topics:
-        _register_structured_labels("topics", [topic])
     if prefill_topics:
         current_topics = st.session_state.get("upload_topics", [])
         st.session_state["upload_topics"] = list(
@@ -385,6 +390,7 @@ def render_upload_tab() -> None:
                 "请补充后归档，或点「暂存到待处理」先保存。"
             )
         else:
+            _persist_selected_structured_labels(structured_values)
             save_session_final(
                 file_data,
                 src_type,
@@ -396,6 +402,7 @@ def render_upload_tab() -> None:
             st.rerun()
 
     if do_pending:
+        _persist_selected_structured_labels(structured_values)
         save_session_pending(
             file_data,
             src_type,
