@@ -21,6 +21,7 @@ def init_state() -> None:
         "batch_mode_archived":   False,
         "semantic_results":      None,
         "semantic_query_used":   "",
+        "insight_sub_tab":       "🔍 检索",
         "date_filter_exact":     None,
         "date_filter_fuzzy":     None,
         "date_filter_range":     ("", ""),
