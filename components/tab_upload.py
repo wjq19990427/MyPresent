@@ -1,4 +1,4 @@
-"""记录舱 Tab — 文件上传 / 粘贴文字 / 文件夹导入。"""
+"""记录台 Tab — 文件上传 / 粘贴文字 / 文件夹导入。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -160,7 +160,7 @@ def _consume_upload_prefill() -> tuple[bool, list[str]]:
 def _render_folder_import() -> None:
     done = st.session_state.get("folder_import_done", 0)
     if done:
-        st.success(f"✅ 已成功导入 **{done}** 条记录到灵感墙！")
+        st.success(f"✅ 已成功导入 **{done}** 条记录到待处理！")
         st.session_state["folder_import_done"] = 0
 
     folder_str: str = st.session_state.get("folder_selected_path", "")
@@ -242,7 +242,7 @@ def _render_folder_import() -> None:
             f" → 将创建 **{n_sess}** 条待处理记录"
         )
 
-        if st.button("📥 导入到灵感墙", type="primary", key="do_import_btn"):
+        if st.button("📥 导入到待处理", type="primary", key="do_import_btn"):
             with st.spinner(f"正在导入 {len(selected_paths)} 个文件…"):
                 count = import_folder_to_pending(selected_paths, as_one_session=as_one)
             st.session_state["folder_scan_results"] = []
@@ -409,9 +409,9 @@ def render_upload_tab() -> None:
         if missing:
             st.warning(
                 f"已暂存！缺少必填项：**{'、'.join(missing)}**\n\n"
-                "请到「灵感墙」补充完整后再归档。"
+                "请到「待处理」补充完整后再归档。"
             )
         else:
-            st.success("已暂存！信息完整，也可在「灵感墙」直接归档。")
+            st.success("已暂存！信息完整，也可在「待处理」直接归档。")
         st.session_state.upload_key += 1
         st.rerun()

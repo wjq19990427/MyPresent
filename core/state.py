@@ -47,7 +47,7 @@ def init_state() -> None:
         "_draft_test_passed":    False,
         "_confirm_edit_pvd":     None,
         "_confirm_edit_mdl":     None,
-        "planning_sub_tab":       "annual",
+        "planning_sub_tab":       "calendar",
         "planning_goal_editing":  None,
         "planning_cat_manager_open": False,
         "planning_goal_filter_status": [],
