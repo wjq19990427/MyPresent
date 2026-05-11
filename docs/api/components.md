@@ -71,7 +71,7 @@
   - 归档（仅 pending）→ `move_to_final(sid)`
   - 删除按钮 → `soft_delete_session(sid)`，清空选中态并关闭详情面板
   - 纯文字 session 直接重写源 .txt 文件
-  - AI 分析产生的新结构化标签在采纳时通过 `add_label` 自动入库
+  - AI 分析产生的新结构化标签只写入当前表单 state；保存/归档前才将用户实际选中的新标签通过 `add_label` 入库
 - **依赖组件**：`forms.render_field_inputs` / `ai_analysis.render_session_ai_analysis` / `_render_comments`
 - **已知陷阱**：widget key 用 `safe_sid = "".join(c if c.isalnum() else "_" for c in sid)` 净化，避免 streamlit 对特殊字符报错
 - **AI 功能位置**：统一 AI 分析在字段编辑区上方，pending/final 均可用；采纳后写入标题、摘要、结构化标签、情绪说明、感受与原因；详情页不再提供 StorySkill 摘要入口
@@ -83,7 +83,7 @@
 ### `_render_label_manager() -> None` / `_render_group_manager() -> None`
 - 标签库：使用四维 `label_registry`，sub-tab 为领域 / 视角 / 话题 / 情绪
 - 标签新增：调用 `add_label(name, type)`；空名称由 UI 拦截
-- 标签删除：仅用户自定义标签显示删除按钮，调用 `remove_label(name, type)`；系统标签只显示 `🔒 系统`
+- 标签删除：仅用户自定义标签显示删除按钮；点击后统计对应结构化字段引用数并展示确认区，确认后调用 `remove_label_cascade(name, type)` 从标签库和已有记录引用中同步移除；系统标签只显示 `🔒 系统`
 - 分组：删分组同步清 `archived_group_filter`
 
 ### 内部辅助
@@ -129,6 +129,7 @@
 - **依赖 session_state**：`upload_key`（计数器，提交后 +1，触发 `file_uploader` 重置）/ `upload_prefill`（规划台跳转预填数据，消费后清空）
 - **预填行为**：若 `upload_prefill` 存在，上传页切换到「📝 粘贴文字」，显示 `st.info("✍️ 已从今日规划预填内容，可继续扩充")`，将 `description` 写入粘贴文本框，将 `topics` 补入结构化话题标签并默认选中，然后立即清空 `upload_prefill`
 - **AI 分析保存**：上传页的统一 AI 分析结果会写入上传表单与结构化标签控件；保存/归档时透传 `domains/attributes/topics/emotion_tags/emotion_note/summary`，并以 `topics` 作为 `tags` 参数桥接旧 `session_tags`
+- **新标签入库时机**：AI 采纳和规划台预填只写入 `st.session_state`；`_structured_options()` 会把当前已选值合并进 options。仅在「完成并归档」或「暂存到待处理」提交前，对用户实际选中的结构化标签与 `label_registry` 比对后调用 `add_label()` 入库。
 
 ### 内部子组件
 
@@ -217,7 +218,7 @@
   - 改名不新增 DB API：创建新分组、迁移原分组关联到新 id、删除旧分组
   - 点击分组进入详情，仅按 `load_db()` 返回的 `group_ids` 过滤该组全部 final 记录，不渲染维度筛选
   - 分组详情批量模式支持软删除 / 移出分组 / 取消选择；移出分组调用 `update_session_groups()`
-- **结构化筛选**：仅全部模式渲染；领域、话题、情绪三行筛选，默认全选；同一维度内 OR，跨维度 AND；全部勾选等同于不筛选
+- **结构化筛选**：仅全部模式渲染；默认折叠为 `📍 筛选：全部领域 · 全部话题 · 全部情绪` 摘要行，点击「自定义 ▾」后展开领域、话题、情绪三行 multiselect；摘要在部分选择时显示 `领域：N/M 项`。筛选逻辑不变：同一维度内 OR，跨维度 AND，全部勾选等同于不筛选
 
 ### 过滤优先级（AND 链）
 

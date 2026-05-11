@@ -125,6 +125,7 @@
 - `get_label_registry(type: str) -> list[dict]`：返回指定类型标签，每条含 `name/is_system`，按 `is_system DESC, name ASC` 排序
 - `add_label(name: str, type: str) -> None`：`INSERT OR IGNORE` 写入用户自定义标签（`is_system=0`）；空名称静默忽略
 - `remove_label(name: str, type: str) -> None`：删除指定 `(name,type)`；不存在静默 no-op；系统标签保护在 UI 层处理
+- `remove_label_cascade(name: str, type: str) -> int`：在一个事务内删除 `(name,type)`，并从所有 session 对应结构化 JSON 字段移除此标签；`type='topic'` 时同步删除 `session_tags.tag=name`；返回实际更新的 session 行数；标签不存在或 type 非法时静默 no-op
 
 ### Groups
 

@@ -100,10 +100,7 @@ def _render_all_view(all_db: list[dict], all_finals: list[dict]) -> None:
         key="archived_type_filter",
     )
 
-    selected_filters = {
-        field: _render_structured_filter(label_type, label, key, color)
-        for field, label_type, label, key, color in _FILTERS
-    }
+    selected_filters = _render_structured_filters_collapsible()
 
     m1, m2 = st.columns(2)
     with m1:
@@ -495,12 +492,43 @@ def _placeholder_html(name: str) -> str:
     )
 
 
-def _render_structured_filter(
-    label_type: str,
-    label: str,
-    key: str,
-    color: str,
-) -> list[str]:
+def _render_structured_filters_collapsible() -> dict[str, list[str]]:
+    selected_filters: dict[str, list[str]] = {}
+    summaries = []
+    for field, label_type, label, key, _color in _FILTERS:
+        options = _sync_structured_filter_state(label_type, key)
+        selected = st.session_state.get(key, [])
+        selected_filters[field] = selected
+        dim = label.replace("筛选", "")
+        if len(selected) == len(options):
+            summaries.append(f"全部{dim}")
+        else:
+            summaries.append(f"{dim}：{len(selected)}/{len(options)} 项")
+
+    expanded = st.session_state.get("_archived_filter_expanded", False)
+    c_summary, c_toggle = st.columns([6, 1.2])
+    with c_summary:
+        st.caption("📍 筛选：" + " · ".join(summaries))
+    with c_toggle:
+        if st.button(
+            "收起 ▴" if expanded else "自定义 ▾",
+            key="toggle_archived_filter_expanded",
+            use_container_width=True,
+        ):
+            st.session_state["_archived_filter_expanded"] = not expanded
+            st.rerun()
+
+    if expanded:
+        for _field, label_type, label, key, color in _FILTERS:
+            _render_structured_filter(label_type, label, key, color)
+        selected_filters = {
+            field: st.session_state.get(key, [])
+            for field, _label_type, _label, key, _color in _FILTERS
+        }
+    return selected_filters
+
+
+def _sync_structured_filter_state(label_type: str, key: str) -> list[str]:
     options = [item["name"] for item in get_label_registry(label_type)]
     previous_options = st.session_state.get(f"{key}_options", [])
     st.session_state[f"{key}_options"] = options
@@ -510,7 +538,16 @@ def _render_structured_filter(
         st.session_state[key] = list(options)
     else:
         st.session_state[key] = [item for item in current if item in options]
+    return options
 
+
+def _render_structured_filter(
+    label_type: str,
+    label: str,
+    key: str,
+    color: str,
+) -> list[str]:
+    options = _sync_structured_filter_state(label_type, key)
     st.markdown(
         f"<span style='display:inline-block;margin-top:6px;padding:2px 8px;"
         f"border-radius:999px;background:{color};color:white;font-size:12px;'>"

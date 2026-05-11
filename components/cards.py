@@ -13,8 +13,9 @@ from core.constants import (
 )
 from core.db_manager import (
     get_groups,
-    add_label, remove_label, create_group, delete_group,
+    add_label, remove_label_cascade, create_group, delete_group,
     get_label_registry,
+    load_db,
     validate_session,
     update_session_fields, update_session_tags, add_comment, delete_comment,
     soft_delete_session,
@@ -470,6 +471,7 @@ def _render_detail(
         topics = _clean_list(structured_values.get("topics", []))
         field_values["group_ids"] = selected_gids
         field_values.update(structured_values)
+        _persist_selected_structured_labels(structured_values)
         update_session_fields(sid, field_values)
         update_session_tags(sid, topics)
         st.session_state[state_key] = sid
@@ -490,6 +492,7 @@ def _render_detail(
             topics = _clean_list(structured_values.get("topics", []))
             field_values["group_ids"] = selected_gids
             field_values.update(structured_values)
+            _persist_selected_structured_labels(structured_values)
             update_session_fields(sid, field_values)
             update_session_tags(sid, topics)
             move_to_final(sid)
@@ -522,7 +525,6 @@ def _apply_analysis_to_detail_form(
                 dict.fromkeys([*values, *_clean_list(result.get("new_topics", []))])
             )
         st.session_state[f"{safe_sid}_{key}"] = values
-        _register_structured_labels(key, values)
 
     if "emotion_note" in result:
         st.session_state[f"{safe_sid}_emotion_note"] = str(
@@ -580,12 +582,20 @@ def _clean_list(value) -> list[str]:
     return [str(item).strip() for item in items if str(item).strip()]
 
 
-def _register_structured_labels(field: str, values: list[str]) -> None:
+def _persist_new_structured_labels(field: str, values: list[str]) -> None:
     label_type = _STRUCTURED_LABEL_TYPES.get(field)
     if not label_type:
         return
+    existing = {item["name"] for item in get_label_registry(label_type)}
     for value in values:
-        add_label(value, label_type)
+        if value not in existing:
+            add_label(value, label_type)
+            existing.add(value)
+
+
+def _persist_selected_structured_labels(values: dict) -> None:
+    for field in _STRUCTURED_LABEL_TYPES:
+        _persist_new_structured_labels(field, _clean_list(values.get(field, [])))
 
 
 # ─── 标签 / 分组 管理面板 ────────────────────────────────────────────────────────
@@ -610,8 +620,14 @@ def _render_label_manager() -> None:
                             key=f"del_label_{label_type}_{name}",
                             help=f"删除「{name}」",
                         ):
-                            remove_label(name, label_type)
+                            st.session_state[
+                                _label_delete_confirm_key(label_type, name)
+                            ] = True
                             st.rerun()
+                    if st.session_state.get(
+                        _label_delete_confirm_key(label_type, name)
+                    ):
+                        _render_label_delete_confirm(name, label_type, field)
                 st.divider()
             else:
                 st.caption(f"暂无{label}")
@@ -631,6 +647,40 @@ def _render_label_manager() -> None:
                     st.rerun()
                 else:
                     st.warning("标签名不能为空")
+
+
+def _label_delete_confirm_key(label_type: str, name: str) -> str:
+    return f"_label_delete_confirm_{label_type}_{name}"
+
+
+def _label_reference_count(name: str, field: str) -> int:
+    return sum(1 for session in load_db() if name in _clean_list(session.get(field, [])))
+
+
+def _render_label_delete_confirm(name: str, label_type: str, field: str) -> None:
+    confirm_key = _label_delete_confirm_key(label_type, name)
+    ref_count = _label_reference_count(name, field)
+    if ref_count:
+        st.warning(
+            f"「{name}」在 {ref_count} 条记录中被引用，"
+            "删除后将从所有记录中移除引用，是否确认？"
+        )
+    else:
+        st.info(f"「{name}」暂无记录引用，确认后直接删除。")
+    c_confirm, c_cancel = st.columns(2)
+    with c_confirm:
+        if st.button(
+            "确认删除",
+            key=f"confirm_del_label_{label_type}_{name}",
+            type="primary",
+        ):
+            remove_label_cascade(name, label_type)
+            st.session_state[confirm_key] = False
+            st.rerun()
+    with c_cancel:
+        if st.button("取消", key=f"cancel_del_label_{label_type}_{name}"):
+            st.session_state[confirm_key] = False
+            st.rerun()
 
 
 def _render_group_manager() -> None:

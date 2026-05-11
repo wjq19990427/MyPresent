@@ -803,6 +803,52 @@ def remove_label(name: str, type: str) -> None:
         )
 
 
+def remove_label_cascade(name: str, type: str) -> int:
+    name = name.strip()
+    col_map = {
+        "domain": "domains",
+        "attribute": "attributes",
+        "topic": "topics",
+        "emotion": "emotion_tags",
+    }
+    column = col_map.get(type)
+    if not name or not column:
+        return 0
+
+    updated = 0
+    with _conn() as conn:
+        existing = conn.execute(
+            "SELECT 1 FROM label_registry WHERE name=? AND type=?",
+            (name, type),
+        ).fetchone()
+        if not existing:
+            return 0
+
+        conn.execute(
+            "DELETE FROM label_registry WHERE name=? AND type=?",
+            (name, type),
+        )
+        rows = conn.execute(
+            f"SELECT id,{column} FROM sessions WHERE {column} LIKE ?",
+            (f"%{name}%",),
+        ).fetchall()
+        for row in rows:
+            values = _json_list(row[column])
+            next_values = [item for item in values if item != name]
+            if next_values == values:
+                continue
+            conn.execute(
+                f"UPDATE sessions SET {column}=? WHERE id=?",
+                (_json_dump_list(next_values), row["id"]),
+            )
+            updated += 1
+
+        if type == "topic":
+            conn.execute("DELETE FROM session_tags WHERE tag=?", (name,))
+
+    return updated
+
+
 # ─── Groups ───────────────────────────────────────────────────────────────────
 
 def get_groups() -> list[dict]:
