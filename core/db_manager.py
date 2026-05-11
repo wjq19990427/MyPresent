@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import calendar as cal_lib
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -155,6 +156,7 @@ CREATE TABLE IF NOT EXISTS calendar_todos (
     reflection      TEXT NOT NULL DEFAULT '',
     postpone_count  INTEGER NOT NULL DEFAULT 0,
     postponed_days  INTEGER NOT NULL DEFAULT 0,
+    postponed_months INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
 );
 
@@ -164,6 +166,8 @@ CREATE TABLE IF NOT EXISTS daily_activities (
     description  TEXT NOT NULL,
     category     TEXT NOT NULL,
     duration     INTEGER NOT NULL DEFAULT 0,
+    start_time   TEXT NOT NULL DEFAULT '',
+    end_time     TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
 );
 
@@ -212,6 +216,17 @@ def init_db() -> None:
                 "ALTER TABLE calendar_todos "
                 "ADD COLUMN postponed_days INTEGER NOT NULL DEFAULT 0"
             )
+        if "postponed_months" not in _todo_cols:
+            conn.execute(
+                "ALTER TABLE calendar_todos "
+                "ADD COLUMN postponed_months INTEGER NOT NULL DEFAULT 0"
+            )
+        _add_column_if_missing(
+            conn, "daily_activities", "start_time", "TEXT NOT NULL DEFAULT ''"
+        )
+        _add_column_if_missing(
+            conn, "daily_activities", "end_time", "TEXT NOT NULL DEFAULT ''"
+        )
         # 初始化默认标签
         for tag in DEFAULT_TAGS:
             conn.execute(
@@ -1157,6 +1172,41 @@ def get_calendar_todo(todo_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def migrate_overdue_todos(target_year: int, target_month: int) -> int:
+    month_start = f"{target_year:04d}-{target_month:02d}-01"
+    _, days_in_month = cal_lib.monthrange(target_year, target_month)
+    migrated = 0
+    with _conn() as conn:
+        _add_column_if_missing(
+            conn,
+            "calendar_todos",
+            "postponed_months",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        rows = conn.execute(
+            """SELECT id,target_date FROM calendar_todos
+               WHERE status != '已完成'
+                 AND target_date < ?
+                 AND recurrence = '仅一次'""",
+            (month_start,),
+        ).fetchall()
+        for row in rows:
+            try:
+                original = datetime.strptime(row["target_date"], "%Y-%m-%d").date()
+            except (TypeError, ValueError):
+                continue
+            new_day = min(original.day, days_in_month)
+            new_date = f"{target_year:04d}-{target_month:02d}-{new_day:02d}"
+            conn.execute(
+                """UPDATE calendar_todos
+                   SET target_date=?, postponed_months=postponed_months+1
+                   WHERE id=?""",
+                (new_date, row["id"]),
+            )
+            migrated += 1
+    return migrated
+
+
 def get_todos_by_goal(goal_id: str) -> list[dict]:
     with _conn() as conn:
         rows = conn.execute(
@@ -1229,13 +1279,30 @@ def create_daily_activity(
     description: str,
     category: str,
     duration: int = 0,
+    start_time: str = "",
+    end_time: str = "",
 ) -> dict:
     aid = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     with _conn() as conn:
+        _add_column_if_missing(
+            conn, "daily_activities", "start_time", "TEXT NOT NULL DEFAULT ''"
+        )
+        _add_column_if_missing(
+            conn, "daily_activities", "end_time", "TEXT NOT NULL DEFAULT ''"
+        )
         conn.execute(
-            "INSERT INTO daily_activities(id,date,description,category,duration)"
-            " VALUES(?,?,?,?,?)",
-            (aid, date, description, category, duration),
+            "INSERT INTO daily_activities"
+            "(id,date,description,category,duration,start_time,end_time)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (
+                aid,
+                date,
+                description,
+                category,
+                duration,
+                str(start_time or "").strip(),
+                str(end_time or "").strip(),
+            ),
         )
         row = conn.execute(
             "SELECT * FROM daily_activities WHERE id=?", (aid,)
@@ -1245,6 +1312,12 @@ def create_daily_activity(
 
 def get_daily_activities(date: str) -> list[dict]:
     with _conn() as conn:
+        _add_column_if_missing(
+            conn, "daily_activities", "start_time", "TEXT NOT NULL DEFAULT ''"
+        )
+        _add_column_if_missing(
+            conn, "daily_activities", "end_time", "TEXT NOT NULL DEFAULT ''"
+        )
         rows = conn.execute(
             "SELECT * FROM daily_activities WHERE date=? ORDER BY created_at ASC",
             (date,),

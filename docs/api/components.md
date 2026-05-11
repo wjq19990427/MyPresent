@@ -14,8 +14,8 @@
 |------|------|----------|
 | `cards.py` | 共用卡片 / 详情 / 评论 / 结构化标签&分组管理 | ✅ |
 | `forms.py` | 表单字段（基于 `FIELD_SCHEMA` 动态渲染） | ✅ |
-| `tab_upload.py` | 「记录舱」Tab | ✅ |
-| `tab_gallery.py` | 「灵感墙」Tab | ✅ |
+| `tab_upload.py` | 「记录台」上传子页 | ✅ |
+| `tab_gallery.py` | 「待处理」子页 | ✅ |
 | `tab_archived.py` | 「已归档」Tab | ✅ |
 | `tab_search.py` | 「搜索」Tab（日期 + 语义 + 问答） | ✅ |
 | `tab_home.py` | 「主页」Tab（项目介绍 + 功能模块概览） | ✅ |
@@ -122,7 +122,7 @@
 
 ## tab_upload.py
 
-> 「记录舱」Tab。三种上传模式：上传文件 / 粘贴文字 / 文件夹批量导入。
+> 「记录台」上传子页。三种上传模式：上传文件 / 粘贴文字 / 文件夹批量导入。
 
 ### `render_upload_tab() -> None`
 - **副作用**：归档调 `save_session_final`；暂存调 `save_session_pending`；文件夹模式调 `import_folder_to_pending`
@@ -135,7 +135,7 @@
 - `_pasted_filename(text) -> str`：粘贴模式自动生成文件名（首行前 20 字符 + `.txt`）
 - `_pick_folder_dialog() -> str`：调用 Windows 文件夹选择器，取消时返回空字符串
 - `_get_uploaded_filenames() -> set[str]`：从 `data/pending|final` 递归提取已落盘文件的原始文件名，用于扫描结果去重
-- `_render_folder_import()`：选择文件夹 → 递归扫描 → multiselect → 模式选择（独立 / 合并） → 导入；文件夹导入不要求预选标签，导入后进入灵感墙再统一处理
+- `_render_folder_import()`：选择文件夹 → 递归扫描 → multiselect → 模式选择（独立 / 合并） → 导入；文件夹导入不要求预选标签，导入后进入待处理再统一处理
 
 ### 强制约束
 
@@ -184,7 +184,7 @@
 
 ## tab_gallery.py
 
-> 「灵感墙」Tab。展示所有 pending 记录，按上传时间倒序。
+> 「待处理」子页。展示所有 pending 记录，按上传时间倒序。
 
 ### `render_gallery_tab() -> None`
 - **过滤条件**：`status == "pending"` **且**至少一个文件实际存在
@@ -315,11 +315,11 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 ## tab_planning.py
 
-> 「📋 规划控制台」Tab。包含「🎯 年度规划」与「📅 日历 & 日志」两个子页。
+> 「规划控制台」Tab。包含「📅 日历 & 日志」与「🎯 年度规划」两个子页。
 
 ### `render_planning_tab() -> None`
-- **副作用**：渲染规划控制台两个子 Tab；年度规划调 `_render_annual_goals()`，日历待办调 `_render_calendar_todos()`
-- **依赖**：所有数据读写均通过 `core.db_manager` 的 `annual_goals` / `calendar_todos` CRUD 与枚举常量
+- **副作用**：渲染规划控制台两个子 Tab；默认入口为「📅 日历 & 日志」，第二个子页为「🎯 年度规划」
+- **依赖**：所有数据读写均通过 `core.db_manager` 的 `annual_goals` / `calendar_todos` / `daily_activities` CRUD 与枚举常量
 
 ### 年度规划子页
 
@@ -351,9 +351,10 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 #### `_render_calendar_todos() -> None`
 - **功能**：月份导航、周一到周日的方格月历、日期选择、日期内待办摘要、事务数量提示、选中日期的待办事宜与今日事务、整月待办列表、新增待办入口
 - **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding`
+- **过期迁移**：当当前渲染月份与上次迁移月份不同时，调用 `migrate_overdue_todos(year, month)`；迁移数大于 0 时在顶部显示一次性提示
 - **视觉约定**：星期标题与日期格共用同一列规格；日期格使用 HTML 信息块展示日期数字、最多 3 条待办摘要和今日事务数量提示；待办摘要前置小号彩色边框优先级标签；待办与事务之间用分隔线区分，超出显示 `+N 更多`；今日和选中日期有不同高亮
 - **交互约定**：选中具体日期后新增待办默认填入该日期；日期视图提供返回月份视图入口，清空 `planning_cal_date`
-- **注意**：重复规则只存储和展示，不在 UI 层自动生成实例
+- **注意**：重复规则只存储和展示，不在 UI 层自动生成实例；重复任务不参与跨月自动迁移
 
 #### `_render_month_nav(year: int, month: int) -> None`
 - **功能**：渲染月份导航，支持 `◀` / `▶` 逐月翻页，也支持年份与月份直接跳转
@@ -370,14 +371,16 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 - **副作用**：保存时调用 `create_calendar_todo()`；取消/保存后关闭表单
 
 #### `_render_todo_row(todo: dict) -> None`
-- **功能**：单条待办展示、完成 checkbox、延期、删除、完成复盘、已完成心得展示
+- **功能**：单条待办展示、完成 checkbox、编辑、延期、删除、完成复盘、已完成心得展示
+- **编辑流程**：点击「编辑」打开内联表单，字段与新增一致（内容 / 分类 / 优先级 / 日期 / 重复 / 关联年度目标）；保存调用 `update_calendar_todo()`，同一时间只保留一个 `_todo_editing_{todo_id}` 为打开状态
 - **完成流程**：勾选未完成待办时打开复盘输入；确认或跳过后调用 `complete_todo()`；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
 - **延期流程**：仅未完成待办显示「延期」入口；展开内联表单后确认调用 `postpone_todo()`；`postpone_count > 0` 时信息行显示延期次数
-- **依赖 session_state**：`_reflection_open` / `_postpone_open`，结构均为 `{todo_id: True}`
+- **依赖 session_state**：`_reflection_open` / `_postpone_open` / `_todo_editing_{todo_id}`
 
 #### `_render_daily_activities(selected_date: str, activities: list[dict], todos: list[dict]) -> None`
 - **渲染条件**：仅在选中具体日期时显示
-- **功能**：展示该日今日事务列表；提供「记录今日事务」入口；新增表单字段为 `description/category/duration`
+- **功能**：展示该日今日事务列表；提供「记录今日事务」入口；新增表单字段为 `description/category/start_time/end_time/duration`
+- **时间段**：开始/结束时间为可选下拉，提供 00:00 到 23:30 的 30 分钟刻度与「自定义…」；自定义校验 `HH:MM`，两端均填写时自动计算分钟数并写入 duration，用户仍可手动覆盖
 - **副作用**：保存时调用 `create_daily_activity()`；删除时调用 `delete_daily_activity()`；保存/取消后关闭表单；保存成功后写 `planning_record_moment_date` 以显示「记录此刻」入口
 - **记录此刻**：保存事务后在当日事务列表下方内联显示「📝 记录此刻的想法？」；点「不了」清空提示状态；点「去记录」调用 `core.llm_client.call_llm(expect_json=False)` 生成草稿，写入 `upload_prefill={"description": ..., "topics": ..., "source": "planning"}`，再设置 `_nav_target=("📝 记录台", "⬆️ 上传")` 跳转到上传页
 

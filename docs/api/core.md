@@ -215,7 +215,7 @@
 - **返回**：单条待办，未找到返回 `None`
 
 #### `get_todos_by_goal(goal_id: str) -> list[dict]`
-- **返回**：所有 `linked_goal_id == goal_id` 的待办，全字段 dict（含 `postpone_count` / `postponed_days`），按 `target_date ASC` 排序
+- **返回**：所有 `linked_goal_id == goal_id` 的待办，全字段 dict（含 `postpone_count` / `postponed_days` / `postponed_months`），按 `target_date ASC` 排序
 - **约束**：不过滤状态，已完成与未完成均返回
 - **副作用**：无
 
@@ -233,15 +233,23 @@
 - **副作用**：将 `target_date` 推迟 `days` 天，`postpone_count += 1`，`postponed_days += days`
 - **约束**：`days <= 0` 时静默 no-op；未找到待办时静默 no-op；不修改 `status` / `reflection`
 
+#### `migrate_overdue_todos(target_year: int, target_month: int) -> int`
+- **用途**：将目标月份之前的过期、未完成、单次待办自动迁移到目标月份
+- **行为**：仅处理 `status != "已完成"`、`target_date < YYYY-MM-01`、`recurrence == "仅一次"` 的待办；迁移后 `postponed_months += 1`
+- **日期规则**：保留原日号，若超过目标月份天数则取目标月最后一天
+- **返回**：实际迁移条数；同一月份重复调用幂等
+- **约束**：不迁移重复任务，不修改 `postpone_todo()` 的按天延期字段
+
 ### Daily Activities
 
-#### `create_daily_activity(date: str, description: str, category: str, duration: int = 0) -> dict`
+#### `create_daily_activity(date: str, description: str, category: str, duration: int = 0, start_time: str = "", end_time: str = "") -> dict`
 - **副作用**：插入 `daily_activities`；ID 使用 `datetime.now().strftime("%Y%m%d_%H%M%S_%f")`
-- **返回**：新建事务实录 dict，字段含 `id/date/description/category/duration/created_at`
+- **返回**：新建事务实录 dict，字段含 `id/date/description/category/duration/start_time/end_time/created_at`
+- **时间段**：`start_time` / `end_time` 可选，按调用方传入的原始字符串落库；DB 层不自动计算 `duration`
 - **约束**：`category` 取值应与 `TODO_CATEGORIES` 一致；DB 层不做 FK 约束
 
 #### `get_daily_activities(date: str) -> list[dict]`
-- **返回**：指定日期的事务实录列表，按 `created_at ASC` 排序
+- **返回**：指定日期的事务实录列表，按 `created_at ASC` 排序；每条包含 `start_time` / `end_time`，历史空值降级为 `""`
 - **副作用**：无
 
 #### `delete_daily_activity(activity_id: str) -> None`
@@ -474,7 +482,7 @@
 - **智能问答**：`llm_selected_model` / `llm_chat_history`
 - **LLM 配置编辑**：`_editing_pvd` / `_editing_mdl` / `_draft_provider` / `_draft_model` / `_test_result` / `_draft_test_passed` / `_confirm_edit_pvd` / `_confirm_edit_mdl`
 - **杂项**：`upload_key`
-- **规划控制台**：`planning_sub_tab` / `planning_goal_editing` / `planning_cat_manager_open` / `planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `planning_record_moment_date` / `_reflection_open` / `_postpone_open`
+- **规划控制台**：`planning_sub_tab`（默认 `"calendar"`） / `planning_goal_editing` / `planning_cat_manager_open` / `planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `planning_record_moment_date` / `_reflection_open` / `_postpone_open`
 
 ### 未在此登记的运行期键（隐式）
 

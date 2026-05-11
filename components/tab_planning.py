@@ -5,6 +5,7 @@ import calendar as cal_lib
 from collections import defaultdict
 from datetime import date, datetime
 from html import escape
+import re
 
 import streamlit as st
 
@@ -26,6 +27,7 @@ from core.db_manager import (
     get_daily_activities,
     get_goal_categories,
     get_todos_by_goal,
+    migrate_overdue_todos,
     postpone_todo,
     add_goal_category,
     create_daily_activity,
@@ -51,11 +53,12 @@ MAX_DAY_TODOS = 3
 
 
 def render_planning_tab() -> None:
-    sub1, sub2 = st.tabs(["🎯 年度规划", "📅 日历 & 日志"])
+    st.session_state.setdefault("planning_sub_tab", "calendar")
+    sub1, sub2 = st.tabs(["📅 日历 & 日志", "🎯 年度规划"])
     with sub1:
-        _render_annual_goals()
-    with sub2:
         _render_calendar_todos()
+    with sub2:
+        _render_annual_goals()
 
 
 def _render_annual_goals() -> None:
@@ -284,7 +287,11 @@ def _render_calendar_todos() -> None:
     year = st.session_state.get("planning_cal_year", datetime.now().year)
     month = st.session_state.get("planning_cal_month", datetime.now().month)
 
+    _maybe_migrate_overdue_todos(year, month)
     _render_month_nav(year, month)
+    migrated_count = int(st.session_state.pop("_planning_migrated_count", 0) or 0)
+    if migrated_count > 0:
+        st.info(f"已自动迁移 {migrated_count} 条过期待办至本月")
 
     todos = get_calendar_todos(year=year, month=month)
     day_map: dict[str, list[dict]] = defaultdict(list)
@@ -329,6 +336,7 @@ def _render_calendar_todos() -> None:
         ):
             _reset_todo_form_date()
             st.session_state["planning_activity_adding"] = False
+            _close_all_todo_editors()
             _reset_activity_form()
             st.session_state["planning_todo_adding"] = True
             st.rerun()
@@ -342,6 +350,7 @@ def _render_calendar_todos() -> None:
                 st.session_state["planning_cal_date"] = None
                 st.session_state["planning_todo_adding"] = False
                 st.session_state["planning_activity_adding"] = False
+                _close_all_todo_editors()
                 _reset_todo_form_date()
                 _reset_activity_form()
                 st.rerun()
@@ -411,13 +420,36 @@ def _set_calendar_month(year: int, month: int) -> None:
     st.rerun()
 
 
+def _maybe_migrate_overdue_todos(year: int, month: int) -> None:
+    current_key = f"{year:04d}-{month:02d}"
+    if st.session_state.get("_planning_migrated_month") == current_key:
+        return
+    migrated_count = migrate_overdue_todos(year, month)
+    st.session_state["_planning_migrated_month"] = current_key
+    st.session_state["_planning_migrated_count"] = migrated_count
+
+
 def _reset_todo_form_date() -> None:
     st.session_state.pop("tf_date", None)
 
 
-def _reset_activity_form() -> None:
-    for key in ("af_description", "af_category", "af_duration"):
+def _reset_todo_form() -> None:
+    for key in ("tf_content", "tf_cat", "tf_pri", "tf_date", "tf_rec", "tf_goal"):
         st.session_state.pop(key, None)
+
+
+def _reset_activity_form() -> None:
+    for key in (
+        "af_description",
+        "af_category",
+        "af_duration",
+        "af_start_time",
+        "af_end_time",
+        "af_start_time_custom",
+        "af_end_time_custom",
+    ):
+        st.session_state.pop(key, None)
+    st.session_state.pop("_af_time_pair", None)
 
 
 def _load_month_activities(year: int, month: int) -> dict[str, list[dict]]:
@@ -596,6 +628,14 @@ def _render_activity_form(selected_date: str) -> None:
         st.markdown("#### 📝 记录今日事务")
         description = st.text_area("事务描述 *", key="af_description")
         category = st.selectbox("分类 *", TODO_CATEGORIES, key="af_category")
+        start_time, start_error = _render_time_select("开始时间", "af_start_time")
+        end_time, end_error = _render_time_select("结束时间", "af_end_time")
+        computed_duration = _duration_between(start_time, end_time)
+        if computed_duration is not None:
+            current_pair = (start_time, end_time)
+            if st.session_state.get("_af_time_pair") != current_pair:
+                st.session_state["af_duration"] = computed_duration
+                st.session_state["_af_time_pair"] = current_pair
         duration = st.number_input(
             "时长（分钟）",
             min_value=0,
@@ -608,12 +648,16 @@ def _render_activity_form(selected_date: str) -> None:
         ca, cb = st.columns(2)
         with ca:
             if st.button("💾 保存", key="af_save", type="primary"):
-                if description.strip():
+                if start_error or end_error:
+                    st.warning(start_error or end_error)
+                elif description.strip():
                     create_daily_activity(
                         selected_date,
                         description.strip(),
                         category,
                         int(duration),
+                        start_time=start_time,
+                        end_time=end_time,
                     )
                     st.session_state["planning_activity_adding"] = False
                     st.session_state["planning_record_moment_date"] = selected_date
@@ -623,6 +667,7 @@ def _render_activity_form(selected_date: str) -> None:
         with cb:
             if st.button("取消", key="af_cancel"):
                 st.session_state["planning_activity_adding"] = False
+                _reset_activity_form()
                 st.rerun()
 
 
@@ -721,6 +766,11 @@ def _infer_activity_topics(activities: list[dict]) -> list[str]:
 def _render_activity_row(activity: dict) -> None:
     duration = int(activity.get("duration") or 0)
     duration_text = f"{duration} 分钟" if duration > 0 else "未记录时长"
+    time_range = _format_time_range(
+        str(activity.get("start_time") or ""), str(activity.get("end_time") or "")
+    )
+    if time_range:
+        duration_text = f"{time_range} · {duration_text}"
     description = escape(activity["description"])
     with st.container(border=True):
         c1, c2 = st.columns([5, 1])
@@ -731,6 +781,63 @@ def _render_activity_row(activity: dict) -> None:
             if st.button("🗑️", key=f"ad_{activity['id']}", help="删除"):
                 delete_daily_activity(activity["id"])
                 st.rerun()
+
+
+def _render_time_select(label: str, key: str) -> tuple[str, str]:
+    options = [""] + _time_options() + ["自定义…"]
+    current = str(st.session_state.get(key) or "")
+    index = options.index(current) if current in options else 0
+    selected = st.selectbox(label, options, index=index, key=key)
+    if selected != "自定义…":
+        return selected, ""
+
+    custom = st.text_input(
+        f"{label}（HH:MM）",
+        key=f"{key}_custom",
+        placeholder="HH:MM",
+    ).strip()
+    if not custom:
+        return "", ""
+    if not _is_valid_time_text(custom):
+        return "", f"{label}格式应为 HH:MM"
+    return _normalize_time_text(custom), ""
+
+
+def _time_options() -> list[str]:
+    return [f"{hour:02d}:{minute:02d}" for hour in range(24) for minute in (0, 30)]
+
+
+def _is_valid_time_text(value: str) -> bool:
+    match = re.fullmatch(r"\d{1,2}:\d{2}", value.strip())
+    if not match:
+        return False
+    hour_text, minute_text = value.split(":", 1)
+    hour = int(hour_text)
+    minute = int(minute_text)
+    return 0 <= hour <= 23 and 0 <= minute <= 59
+
+
+def _normalize_time_text(value: str) -> str:
+    hour_text, minute_text = value.strip().split(":", 1)
+    return f"{int(hour_text):02d}:{int(minute_text):02d}"
+
+
+def _duration_between(start_time: str, end_time: str) -> int | None:
+    if not (start_time and end_time):
+        return None
+    try:
+        start = datetime.strptime(start_time, "%H:%M")
+        end = datetime.strptime(end_time, "%H:%M")
+    except ValueError:
+        return None
+    delta_minutes = int((end - start).total_seconds() // 60)
+    return delta_minutes if delta_minutes >= 0 else None
+
+
+def _format_time_range(start_time: str, end_time: str) -> str:
+    if start_time and end_time:
+        return f"{start_time}-{end_time}"
+    return start_time or end_time
 
 
 def _render_todo_form(selected_date: str | None, year: int, month: int) -> None:
@@ -778,7 +885,78 @@ def _render_todo_form(selected_date: str | None, year: int, month: int) -> None:
         with tb:
             if st.button("取消", key="tf_cancel"):
                 st.session_state["planning_todo_adding"] = False
+                _reset_todo_form()
                 st.rerun()
+
+
+def _render_todo_edit_form(todo: dict) -> None:
+    tid = todo["id"]
+    linkable_goals = get_annual_goals(status_filter=["未开始", "进行中"])
+    linked_goal_id = todo.get("linked_goal_id")
+    if linked_goal_id and not any(g["id"] == linked_goal_id for g in linkable_goals):
+        linkable_goals.append({"id": linked_goal_id, "content": "当前关联目标"})
+
+    category_index = _option_index(TODO_CATEGORIES, todo.get("category"))
+    priority_index = _option_index(TODO_PRIORITIES, todo.get("priority"))
+    recurrence_index = _option_index(TODO_RECURRENCES, todo.get("recurrence"))
+    target_date = _parse_date(todo.get("target_date")) or date.today()
+
+    with st.container(border=True):
+        st.markdown("#### ✏️ 编辑待办")
+        content = st.text_area(
+            "待办内容 *", value=todo.get("content", ""), key=f"te_content_{tid}"
+        )
+        category = st.selectbox(
+            "分类 *", TODO_CATEGORIES, index=category_index, key=f"te_cat_{tid}"
+        )
+        priority = st.selectbox(
+            "优先级 *", TODO_PRIORITIES, index=priority_index, key=f"te_pri_{tid}"
+        )
+        new_date = st.date_input("执行日期 *", value=target_date, key=f"te_date_{tid}")
+        recurrence = st.selectbox(
+            "重复规则",
+            TODO_RECURRENCES,
+            index=recurrence_index,
+            key=f"te_rec_{tid}",
+        )
+
+        goal_options = {None: "（不关联）"}
+        goal_options.update({g["id"]: g["content"][:40] for g in linkable_goals})
+        goal_ids = list(goal_options.keys())
+        goal_index = goal_ids.index(linked_goal_id) if linked_goal_id in goal_ids else 0
+        linked_goal = st.selectbox(
+            "关联年度目标（选填）",
+            options=goal_ids,
+            index=goal_index,
+            format_func=lambda k: goal_options[k],
+            key=f"te_goal_{tid}",
+        )
+
+        ca, cb = st.columns(2)
+        with ca:
+            if st.button("💾 保存", key=f"te_save_{tid}", type="primary"):
+                if content.strip():
+                    update_calendar_todo(
+                        tid,
+                        content=content.strip(),
+                        category=category,
+                        priority=priority,
+                        target_date=str(new_date),
+                        recurrence=recurrence,
+                        linked_goal_id=linked_goal,
+                    )
+                    _close_todo_editor(tid)
+                    st.rerun()
+                else:
+                    st.warning("待办内容为必填项")
+        with cb:
+            if st.button("取消", key=f"te_cancel_{tid}"):
+                _close_todo_editor(tid)
+                st.rerun()
+
+
+def _option_index(options: list[str], value: str | None) -> int:
+    return options.index(value) if value in options else 0
 
 
 def _render_todo_row(todo: dict) -> None:
@@ -790,6 +968,7 @@ def _render_todo_row(todo: dict) -> None:
     color_style = "color:gray;" if is_done else ""
     reflection_open = st.session_state.get("_reflection_open", {}).get(tid, False)
     postpone_open = st.session_state.get("_postpone_open", {}).get(tid, False)
+    editing_open = st.session_state.get(f"_todo_editing_{tid}", False)
 
     with st.container(border=True):
         rc1, rc2, rc3, rc4 = st.columns([0.5, 5.5, 1, 1])
@@ -823,6 +1002,9 @@ def _render_todo_row(todo: dict) -> None:
                 f"{todo['target_date']} · {todo['category']} · "
                 f"{todo['recurrence']}{linked}{postponed}"
             )
+            if st.button("编辑", key=f"te_{tid}", help="编辑"):
+                _open_todo_editor(tid)
+                st.rerun()
         with rc3:
             if not is_done and st.button("延期", key=f"tp_{tid}", help="延期"):
                 postpone_state = st.session_state.get("_postpone_open", {})
@@ -834,6 +1016,9 @@ def _render_todo_row(todo: dict) -> None:
                 delete_calendar_todo(tid)
                 st.rerun()
 
+        if editing_open:
+            _render_todo_edit_form(todo)
+
         if reflection_open:
             _render_reflection_box(tid)
 
@@ -842,6 +1027,24 @@ def _render_todo_row(todo: dict) -> None:
 
         if is_done and todo.get("reflection"):
             st.caption(f"💬 {todo['reflection']}")
+
+
+def _open_todo_editor(todo_id: str) -> None:
+    _close_all_todo_editors()
+    st.session_state[f"_todo_editing_{todo_id}"] = True
+    st.session_state["planning_todo_adding"] = False
+    _close_reflection(todo_id)
+    _close_postpone(todo_id)
+
+
+def _close_todo_editor(todo_id: str) -> None:
+    st.session_state.pop(f"_todo_editing_{todo_id}", None)
+
+
+def _close_all_todo_editors() -> None:
+    for key in list(st.session_state.keys()):
+        if key.startswith("_todo_editing_"):
+            st.session_state.pop(key, None)
 
 
 def _render_reflection_box(todo_id: str) -> None:
