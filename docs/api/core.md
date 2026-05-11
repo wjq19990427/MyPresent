@@ -127,6 +127,21 @@
 - `remove_label(name: str, type: str) -> None`：删除指定 `(name,type)`；不存在静默 no-op；系统标签保护在 UI 层处理
 - `remove_label_cascade(name: str, type: str) -> int`：在一个事务内删除 `(name,type)`，并从所有 session 对应结构化 JSON 字段移除此标签；`type='topic'` 时同步删除 `session_tags.tag=name`；返回实际更新的 session 行数；标签不存在或 type 非法时静默 no-op
 
+### Emotion Scores
+
+#### `upsert_emotion_scores(session_id: str, scores: dict[str, float], mode: str, model_id: str = '') -> None`
+- **用途**：写入情绪强度评分缓存
+- **副作用**：批量 `INSERT OR REPLACE` 到 `emotion_scores`；重复调用幂等
+- **约束**：`mode` 必须是 `"quick"` 或 `"precise"`；分数写入前 clamp 到 `0.0..1.0`；空 emotion 或不可转 float 的分数会跳过
+
+#### `get_emotion_scores(session_ids: list[str], mode: str) -> dict[str, dict[str, float]]`
+- **返回**：`{session_id: {emotion: score}}`
+- **约束**：仅返回已缓存条目；未缓存的 `session_id` 不出现在结果中
+
+#### `get_uncached_session_ids(session_ids: list[str], mode: str) -> list[str]`
+- **返回**：在 `emotion_scores` 中没有该 `mode` 任何缓存条目的 `session_id` 列表
+- **约束**：保持入参顺序
+
 ### Groups
 
 - `get_groups() -> list[dict]` ：按 created_at 升序
@@ -383,6 +398,8 @@
 | `STORY_PERIOD_USER_TMPL` | 时间段叙事 user | `{period}` `{memories}` |
 | `ANALYSIS_SYSTEM` | 结构化分析 system | — |
 | `ANALYSIS_USER_TMPL` | 结构化分析 user | `{content}` `{fields}` `{registry_section}` `{hint_section}` |
+| `EMOTION_SCORING_SYSTEM` | 情绪强度评分 system | — |
+| `EMOTION_SCORING_USER_TMPL` | 情绪强度评分 user | `{emotions}` `{content}` |
 | `PLANNING_RECORD_MOMENT_SYSTEM` | 规划台「记录此刻」草稿生成 system | — |
 | `PLANNING_RECORD_MOMENT_USER_TMPL` | 规划台「记录此刻」草稿生成 user | `{date}` `{activities}` `{todos}` |
 | `QA_SYSTEM` | 智能问答 system | — |

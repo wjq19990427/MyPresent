@@ -127,6 +127,16 @@ CREATE TABLE IF NOT EXISTS llm_logs (
     created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now', 'localtime'))
 );
 
+CREATE TABLE IF NOT EXISTS emotion_scores (
+    session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    emotion     TEXT NOT NULL,
+    score       REAL NOT NULL CHECK(score >= 0.0 AND score <= 1.0),
+    mode        TEXT NOT NULL CHECK(mode IN ('quick', 'precise')),
+    model_id    TEXT DEFAULT '',
+    computed_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, emotion, mode)
+);
+
 CREATE TABLE IF NOT EXISTS operation_logs (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id   TEXT    NOT NULL,
@@ -875,6 +885,74 @@ def create_group(name: str) -> str:
 def delete_group(group_id: str) -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM groups WHERE id=?", (group_id,))
+
+
+# ─── Emotion Scores ──────────────────────────────────────────────────────────
+
+def upsert_emotion_scores(
+    session_id: str,
+    scores: dict[str, float],
+    mode: str,
+    model_id: str = "",
+) -> None:
+    if mode not in {"quick", "precise"}:
+        raise ValueError("mode 必须为 quick 或 precise")
+    rows = []
+    computed_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for emotion, score in (scores or {}).items():
+        emotion = str(emotion).strip()
+        if not emotion:
+            continue
+        try:
+            value = float(score)
+        except (TypeError, ValueError):
+            continue
+        value = max(0.0, min(1.0, value))
+        rows.append((session_id, emotion, value, mode, model_id or "", computed_at))
+    if not rows:
+        return
+
+    with _conn() as conn:
+        conn.executemany(
+            """INSERT OR REPLACE INTO emotion_scores
+               (session_id,emotion,score,mode,model_id,computed_at)
+               VALUES(?,?,?,?,?,?)""",
+            rows,
+        )
+
+
+def get_emotion_scores(
+    session_ids: list[str],
+    mode: str,
+) -> dict[str, dict[str, float]]:
+    if not session_ids:
+        return {}
+    placeholders = ",".join("?" * len(session_ids))
+    result: dict[str, dict[str, float]] = {}
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT session_id,emotion,score FROM emotion_scores
+                WHERE mode=? AND session_id IN ({placeholders})
+                ORDER BY session_id, emotion""",
+            (mode, *session_ids),
+        ).fetchall()
+    for row in rows:
+        result.setdefault(row["session_id"], {})[row["emotion"]] = float(row["score"])
+    return result
+
+
+def get_uncached_session_ids(session_ids: list[str], mode: str) -> list[str]:
+    if not session_ids:
+        return []
+    placeholders = ",".join("?" * len(session_ids))
+    with _conn() as conn:
+        rows = conn.execute(
+            f"""SELECT DISTINCT session_id FROM emotion_scores
+                WHERE mode=? AND session_id IN ({placeholders})""",
+            (mode, *session_ids),
+        ).fetchall()
+    cached = {r["session_id"] for r in rows}
+    return [sid for sid in session_ids if sid not in cached]
 
 
 # ─── LLM Providers ────────────────────────────────────────────────────────────

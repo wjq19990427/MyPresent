@@ -3,7 +3,7 @@
 > `data/database.db` · WAL 模式 · `PRAGMA foreign_keys=ON`
 > Schema 单一信息源：`core/db_manager.py::_SCHEMA`
 
-## 表清单（实际 18 张）
+## 表清单（实际 19 张）
 
 | # | 表 | 主键 | 职责 | 契约状态 |
 |---|----|------|------|----------|
@@ -25,6 +25,7 @@
 | 16 | `goal_categories` | `name` (TEXT) | 年度规划分类注册表 | ✅ |
 | 17 | `label_registry` | (`name`, `type`) | L-A-T / 情绪标签注册表 | ✅ |
 | 18 | `session_linked_goals` | `id` (TEXT) | session ↔ 年度目标关联 | ✅ |
+| 19 | `emotion_scores` | (`session_id`, `emotion`, `mode`) | 情绪强度评分缓存 | ✅ |
 
 ---
 
@@ -236,11 +237,23 @@
 | `created_at` | TEXT | NOT NULL |
 | **UNIQUE** | — | (`session_id`, `goal_id`) |
 
+### 19. emotion_scores
+
+| 字段 | 类型 | 约束 |
+|------|------|------|
+| `session_id` | TEXT | NOT NULL, **FK → sessions(id) ON DELETE CASCADE** |
+| `emotion` | TEXT | NOT NULL |
+| `score` | REAL | NOT NULL, CHECK `0.0 <= score <= 1.0` |
+| `mode` | TEXT | NOT NULL, CHECK 取值：`quick` / `precise` |
+| `model_id` | TEXT | default `''` |
+| `computed_at` | TEXT | NOT NULL |
+| **PK** | — | (`session_id`, `emotion`, `mode`) |
+
 ---
 
 ## 跨表不变量
 
-- 删除 `sessions` 行 → 级联删除 `session_files` / `session_tags` / `session_groups` / `edit_history` / `comments` / `session_linked_goals`
+- 删除 `sessions` 行 → 级联删除 `session_files` / `session_tags` / `session_groups` / `edit_history` / `comments` / `session_linked_goals` / `emotion_scores`
 - 删除 `groups` 行 → 级联删除 `session_groups`（`update_session_fields` 调用方仍需自行清理 UI 选择状态）
 - 删除 `llm_providers` 行 → 级联删除 `llm_models`，但 `llm_logs` 保留
 - 删除 `annual_goals` 行 → 级联删除 `session_linked_goals`；`calendar_todos.linked_goal_id` 置空，待办本身保留
