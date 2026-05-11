@@ -108,6 +108,29 @@ ANALYSIS_USER_TMPL = """\
 请严格按要求返回 JSON。\
 """
 
+# ─── 情绪强度评分（EmotionScoringSkill） ──────────────────────────────────────
+
+EMOTION_SCORING_SYSTEM = """\
+你是一位情绪分析助手。请根据用户提供的个人记录文本，对指定情绪列表中的每一种情绪输出 0 到 1 的强度分。
+
+规则：
+- 只输出纯 JSON，不要任何额外文字、注释或 markdown 代码块
+- JSON key 必须是给定情绪列表中的情绪名称
+- JSON value 必须是 0 到 1 之间的数字
+- 0 表示文本中完全没有该情绪，1 表示该情绪非常强烈
+- 不要输出给定列表之外的情绪\
+"""
+
+EMOTION_SCORING_USER_TMPL = """\
+候选情绪：
+{emotions}
+
+记录内容：
+{content}
+
+请返回每一种候选情绪的强度 JSON。\
+"""
+
 # ─── 规划台记录草稿（Planning → Upload prefill） ──────────────────────────────
 
 PLANNING_RECORD_MOMENT_SYSTEM = """\

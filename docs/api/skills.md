@@ -16,6 +16,7 @@
 | `tagging_skill.py` | 自动打标（从注册表中推荐） | ✅ |
 | `analysis_skill.py` | 单次结构化分析（标题/摘要/标签/感受/原因） | ✅ |
 | `story_skill.py` | 单条摘要 + 时间段叙事 | ✅ |
+| `emotion_scoring_skill.py` | 情绪强度评分（快速统计 + LLM 精准评分） | ✅ |
 
 ---
 
@@ -202,6 +203,44 @@
 - `STORY_SINGLE_SYSTEM` / `STORY_SINGLE_USER_TMPL`：`{content_time, description, feeling, reason_section}`
 - `STORY_PERIOD_SYSTEM` / `STORY_PERIOD_USER_TMPL`：`{period, memories}`
 - 全部位于 `core/prompts.py`
+
+## emotion_scoring_skill.py
+
+> 为情绪热力矩阵和洞察报告生成 `{session_id: {emotion: score}}` 情绪强度数据。
+
+### `class EmotionScoringSkill(BaseSkill)`
+
+- `name = "emotion_scoring"` · `description = "生成记录的情绪强度评分"`
+
+#### `score_quick(self, sessions: list[dict]) -> dict[str, dict[str, float]]`
+
+- **用途**：无 LLM 的快速评分
+- **入参**：session list；仅读取传入 dict 的 `session_id/id` 与 `emotion_tags`
+- **返回**：`{session_id: {emotion: 1.0}}`；仅包含该 session 实际命中的情绪，未命中情绪不填
+- **副作用**：批量调用 `db_manager.upsert_emotion_scores(..., mode="quick")`
+- **不变量**：不调用 LLM；不直接读取 `sessions` 表；不跨 session 归一化
+
+#### `score_precise(self, sessions: list[dict], model_id: str) -> dict[str, dict[str, float]]`
+
+- **用途**：LLM 精准情绪强度评分，带 DB 缓存
+- **入参**：session list；候选情绪来自所有传入 session 的 `emotion_tags` 并集；`model_id` 传给 `call_llm`
+- **返回**：`{session_id: {emotion: score}}`，仅包含请求的 session；单条失败时该 session 返回已缓存值或空 dict
+- **副作用**：
+  - 读 `db_manager.get_emotion_scores()` / `get_uncached_session_ids()`
+  - 对未缓存 session 调 `core.llm_client.call_llm(expect_json=True)`，自动写 `llm_logs`
+  - 写 `db_manager.upsert_emotion_scores(..., mode="precise", model_id=model_id)`
+- **失败路径**：单条 LLM 调用或 JSON 解析失败时静默跳过该 session，不中断整批
+- **不变量**：不直接读取 `sessions` 表；不跨 session 归一化；分数 clamp 到 `0.0..1.0`
+
+#### `run(self, session: dict, model_id: str = "", **kwargs) -> SkillResult`
+
+- **用途**：兼容 `BaseSkill.run()` 的单条入口
+- **kwargs**：`mode` 默认为 `"quick"`，可传 `"precise"`
+- **返回**：`SkillResult.data = {emotion: score}`
+
+### Prompt 依赖
+
+- `core/prompts.EMOTION_SCORING_SYSTEM` / `EMOTION_SCORING_USER_TMPL`（变量 `{emotions}` `{content}`）
 
 ## completion_skill.py
 
