@@ -482,6 +482,7 @@
 - **导航**：`active_tab` / `active_sub_tab` / `_nav_target`
 - **选择状态**：`pending_selected` / `archived_selected` / `search_selected`
 - **搜索**：`semantic_results` / `semantic_query_used` / `date_filter_exact` / `_fuzzy` / `_range` / `_search_mode_prev`
+- **洞见**：`insight_sub_tab`（默认 `"🔍 检索"`）
 - **已归档视图/过滤**：`archived_view_mode`（默认 `"all"`）/ `archived_group_selected`（默认 `None`）/ `archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`
 - **文件夹批量导入**：`folder_selected_path` / `folder_scan_results` / `folder_scan_skipped_n` / `folder_import_done`
 - **上传预填**：`upload_prefill`

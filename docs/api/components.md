@@ -17,7 +17,8 @@
 | `tab_upload.py` | 「记录台」上传子页 | ✅ |
 | `tab_gallery.py` | 「待处理」子页 | ✅ |
 | `tab_archived.py` | 「已归档」Tab | ✅ |
-| `tab_search.py` | 「搜索」Tab（日期 + 语义 + 问答） | ✅ |
+| `tab_insight.py` | 「洞见」Tab（检索 / 情绪趋势 / 洞察报告） | ✅ |
+| `tab_search.py` | 「洞见」检索子组件（日期 + 语义 + 问答） | ✅ |
 | `tab_home.py` | 「主页」Tab（项目介绍 + 功能模块概览） | ✅ |
 | `eval_dashboard.py` | 「运行看板」Tab | ✅ |
 | `ai_analysis.py` | 上传草稿统一 AI 分析面板 | ✅ |
@@ -33,8 +34,8 @@
 > 「主页」Tab。展示项目介绍与 5 个功能模块卡片。
 
 ### `render_home(on_navigate: Callable[[str], None] | None = None) -> None`
-- **功能**：渲染标题区、项目介绍文案，以及「记录台 / 探索 / 规划台 / 回收站 / 系统」5 个模块卡片
-- **入参**：`on_navigate` 可选导航回调；用户点击模块入口时传入目标 key（`record/search/planning/recycle/system`）
+- **功能**：渲染标题区、项目介绍文案，以及「记录台 / 洞见 / 规划台 / 回收站 / 系统」5 个模块卡片
+- **入参**：`on_navigate` 可选导航回调；用户点击模块入口时传入目标 key（`record/insight/planning/recycle/system`）
 - **布局**：模块卡片使用 `st.columns` 分两行展示；每张卡片使用 `st.container(border=True)` 渲染边框
 - **副作用**：无写库；提供 `on_navigate` 时点击模块入口会调用该回调
 - **约束**：顶层直接调用，不嵌套在任何 `st.form` 内
@@ -232,9 +233,22 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 ---
 
+## tab_insight.py
+
+> 「🪞 洞见」Tab。提供洞见内部子页框架。
+
+### `render_insight_tab() -> None`
+- **功能**：通过 `insight_sub_tab` 渲染三个内部子页：「🔍 检索」/「🌈 情绪趋势」/「📋 洞察报告」
+- **检索子页**：直接调用 `tab_search.render_search_tab()`，保持原日期过滤 / 语义检索 / 智能问答行为不变
+- **占位子页**：「🌈 情绪趋势」显示 `情绪趋势功能即将上线`；「📋 洞察报告」显示 `洞察报告功能即将上线`
+- **依赖 session_state**：`insight_sub_tab`
+- **约束**：本模块只做子页导航与占位，不实现情绪趋势或洞察报告业务逻辑
+
+---
+
 ## tab_search.py
 
-> 「搜索」Tab。三种模式：日期过滤 / 语义检索 / 智能问答。
+> 「洞见 / 检索」子组件。三种模式：日期过滤 / 语义检索 / 智能问答。
 
 ### `render_search_tab() -> None`
 - **模式切换**：`_search_mode_prev` 不等于当前模式时清空所有结果与选中态
