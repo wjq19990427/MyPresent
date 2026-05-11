@@ -1371,6 +1371,22 @@ def get_daily_activities(date: str) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_monthly_activity_stats(year: int, month: int) -> dict[str, int]:
+    year_month = f"{int(year):04d}-{int(month):02d}"
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT category, COALESCE(SUM(duration), 0) AS total_duration
+            FROM daily_activities
+            WHERE strftime('%Y-%m', date) = ?
+            GROUP BY category
+            ORDER BY category ASC
+            """,
+            (year_month,),
+        ).fetchall()
+    return {str(r["category"]): int(r["total_duration"] or 0) for r in rows}
+
+
 def delete_daily_activity(activity_id: str) -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM daily_activities WHERE id=?", (activity_id,))

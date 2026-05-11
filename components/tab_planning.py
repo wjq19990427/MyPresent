@@ -26,6 +26,7 @@ from core.db_manager import (
     get_calendar_todos,
     get_daily_activities,
     get_goal_categories,
+    get_monthly_activity_stats,
     get_todos_by_goal,
     migrate_overdue_todos,
     postpone_todo,
@@ -50,6 +51,16 @@ PRIORITY_COLORS = {
 CALENDAR_COL_SPEC = [1, 1, 1, 1, 1, 1, 1]
 WEEK_HEADERS = ["一", "二", "三", "四", "五", "六", "日"]
 MAX_DAY_TODOS = 3
+
+
+def format_duration(minutes: int) -> str:
+    minutes = max(0, int(minutes or 0))
+    hours, mins = divmod(minutes, 60)
+    if hours == 0:
+        return f"{mins}分钟"
+    if mins == 0:
+        return f"{hours}小时"
+    return f"{hours}小时{mins}分钟"
 
 
 def render_planning_tab() -> None:
@@ -314,6 +325,8 @@ def _render_calendar_todos() -> None:
                 _render_calendar_cell(
                     year, month, day_num, selected_date, day_map, activity_map
                 )
+
+    _render_monthly_activity_stats(year, month)
 
     st.divider()
     selected_date = st.session_state.get("planning_cal_date")
@@ -617,7 +630,54 @@ def _render_daily_activities(
         return
     for activity in activities:
         _render_activity_row(activity)
+    _render_daily_activity_stats(activities)
     _render_record_moment_prompt(selected_date, activities, todos)
+
+
+def _activity_duration_totals(activities: list[dict]) -> dict[str, int]:
+    totals: dict[str, int] = defaultdict(int)
+    for activity in activities:
+        duration = int(activity.get("duration") or 0)
+        if duration <= 0:
+            continue
+        category = str(activity.get("category") or "未分类").strip() or "未分类"
+        totals[category] += duration
+    return dict(totals)
+
+
+def _ordered_duration_items(stats: dict[str, int]) -> list[tuple[str, int]]:
+    category_order = {category: i for i, category in enumerate(TODO_CATEGORIES)}
+    return sorted(
+        stats.items(),
+        key=lambda item: (category_order.get(item[0], len(category_order)), item[0]),
+    )
+
+
+def _render_daily_activity_stats(activities: list[dict]) -> None:
+    stats = _activity_duration_totals(activities)
+    if not stats:
+        return
+    total = sum(stats.values())
+    parts = [
+        f"{category} {format_duration(minutes)}"
+        for category, minutes in _ordered_duration_items(stats)
+    ]
+    parts.append(f"合计 {format_duration(total)}")
+    st.caption("⏱ 今日：" + " · ".join(parts))
+
+
+def _render_monthly_activity_stats(year: int, month: int) -> None:
+    stats = get_monthly_activity_stats(year, month)
+    with st.expander("📊 本月时长统计", expanded=False):
+        if not stats:
+            st.info("本月暂无事务记录")
+            return
+        for category, minutes in _ordered_duration_items(stats):
+            cols = st.columns([2, 4])
+            cols[0].markdown(f"**{category}**")
+            cols[1].markdown(format_duration(minutes))
+        st.divider()
+        st.markdown(f"**合计：{format_duration(sum(stats.values()))}**")
 
 
 def _render_activity_form(selected_date: str) -> None:

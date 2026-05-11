@@ -253,6 +253,11 @@
 - **返回**：指定日期的事务实录列表，按 `created_at ASC` 排序；每条包含 `start_time` / `end_time`，历史空值降级为 `""`
 - **副作用**：无
 
+#### `get_monthly_activity_stats(year: int, month: int) -> dict[str, int]`
+- **返回**：指定月份的事务时长统计，形如 `{category: total_minutes}`；仅返回当月有事务记录的分类
+- **过滤规则**：按 `daily_activities.date` 的 `YYYY-MM` 匹配指定年月，按 `category` 分组累加 `duration`
+- **副作用**：无
+
 #### `delete_daily_activity(activity_id: str) -> None`
 - **副作用**：删除指定事务实录
 
