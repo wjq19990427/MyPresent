@@ -235,15 +235,15 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 ## tab_insight.py
 
-> 「🪞 洞见」Tab。提供洞见内部子页框架、检索入口与情绪趋势热力矩阵。
+> 「🪞 洞见」Tab。提供洞见内部子页框架、情绪趋势热力矩阵与洞察报告 UI。
 
 ### `render_insight_tab() -> None`
 - **功能**：通过 `insight_sub_tab` 渲染三个内部子页：「🔍 检索」/「🌈 情绪趋势」/「📋 洞察报告」
 - **检索子页**：直接调用 `tab_search.render_search_tab()`，保持原日期过滤 / 语义检索 / 智能问答行为不变
 - **情绪趋势子页**：调用本模块内部情绪趋势渲染流程，展示筛选区、热力矩阵与下钻记录列表
-- **占位子页**：「📋 洞察报告」显示 `洞察报告功能即将上线`
-- **依赖 session_state**：`insight_sub_tab`
-- **约束**：本模块不直接操作 `emotion_scores` 表；快速评分只调用 `EmotionScoringSkill.score_quick()`，精准评分只在用户点击按钮后调用 `EmotionScoringSkill.score_precise()`
+- **洞察报告子页**：渲染时间范围、评分模式、模型选择、「一键生成全部」与五个报告段落 expander
+- **依赖 session_state**：`insight_sub_tab` / `insight_date_start` / `insight_date_end` / `_insight_report_{section}` / `_insight_report_signature`
+- **约束**：本模块不直接操作 `emotion_scores` 表；报告内容仅缓存在 `session_state`，不写 DB；业务生成委托 `InsightReportSkill`
 
 ### 情绪趋势子页
 
@@ -251,10 +251,20 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 - **筛选控件**：开始日期 / 结束日期默认最近 90 天；时间粒度支持 `week / month / year`，默认月；评分模式支持 `quick / precise`，默认快速
 - **情绪集合**：行集合来自筛选结果中 `emotion_tags` 的并集，按 `get_label_registry("emotion")` 顺序优先，其余新增情绪按名称排序补齐；无情绪标签时显示空态提示
 - **热力矩阵**：使用 plotly `go.Heatmap`；每个情绪单独一条单行 trace，颜色为白色到该情绪固定基础色，单元格值为该情绪在该周期内所有记录的平均 score，空值按 0 显示
-- **颜色约定**：默认情绪（喜悦 / 平静 / 充实 / 期待 / 疲惫 / 焦虑 / 愤怒 / 失落 / 迷茫）使用组件内部固定 hex；用户新增情绪从备用色池循环分配，不写 DB
-- **精准模式**：切换到精准模式显示 LLM 消耗提示与「开始精准分析」按钮；按钮点击后使用当前全局 `llm_selected_model` 调 `EmotionScoringSkill.score_precise()`，完成后刷新；未选择模型时按钮禁用
-- **下钻**：plotly 点选单元格后，或使用下钻选择器选择情绪 + 周期后，在矩阵下方用 `cards._render_card()` 展示该周期内包含该情绪标签的记录
-- **降级**：若运行环境缺少 plotly，组件显示依赖缺失提示，不影响洞见 Tab 其它子页导入和运行
+- **颜色约定**：默认情绪使用组件内部固定 hex；用户新增情绪从备用色池循环分配，不写 DB
+- **精准模式**：切换到精准模式显示 LLM 消耗提示与「开始精准分析」按钮；未选择模型时按钮禁用
+- **下钻**：plotly 点选单元格后，或使用下钻选择器后，在矩阵下方用 `cards._render_card()` 展示对应记录
+- **降级**：若运行环境缺少 plotly，组件显示依赖缺失提示，不影响其它子页
+
+### 洞察报告子页
+
+- **数据来源**：UI 调 `load_db()` 读取 final sessions，根据 `content_time` 过滤时间范围
+- **统计预计算**：调用 Skill 前组装 `emotion_scores / emotion_freq / topic_freq / domain_freq / record_dates / linked_goal_ids / weekday_freq / time_bucket_freq / linked_goal_summary`
+- **报告段落**：`🌈 情绪画像` / `🗺️ 话题聚焦` / `🔄 行为规律` / `🎯 目标追踪` / `💬 代表语录`
+- **交互**：一键生成顺序请求全部段；每个 expander 内的生成/重新生成只请求对应 section，不清空其他缓存
+- **缓存失效**：时间范围、评分模式或过滤后的 session id 集合变化时清空 `_insight_report_*`
+- **目标段**：当前时段无关联目标时显示提示，不触发 LLM
+- **代表语录**：按引用块展示 `quotes` 数组
 
 ---
 

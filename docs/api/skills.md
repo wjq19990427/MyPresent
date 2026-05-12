@@ -17,6 +17,7 @@
 | `analysis_skill.py` | 单次结构化分析（标题/摘要/标签/感受/原因） | ✅ |
 | `story_skill.py` | 单条摘要 + 时间段叙事 | ✅ |
 | `emotion_scoring_skill.py` | 情绪强度评分（快速统计 + LLM 精准评分） | ✅ |
+| `insight_report_skill.py` | 分段生成个人洞察报告 | ✅ |
 
 ---
 
@@ -241,6 +242,47 @@
 ### Prompt 依赖
 
 - `core/prompts.EMOTION_SCORING_SYSTEM` / `EMOTION_SCORING_USER_TMPL`（变量 `{emotions}` `{content}`）
+
+## insight_report_skill.py
+
+> 基于 UI 层已过滤记录与预计算统计，分段生成洞察报告。Skill 不读库、不写报告内容。
+
+### `class InsightReportSkill(BaseSkill)`
+
+- `name = "insight_report"` · `description = "分段生成个人洞察报告"`
+
+#### `execute(self, sessions: list[dict], stats: dict, period_label: str, model_id: str, *, sections="all") -> SkillResult`
+
+- **入参**：
+  - `sessions`：UI 层已过滤的 final session list
+  - `stats`：UI 层预计算统计，至少包含 `emotion_scores / emotion_freq / topic_freq / domain_freq / record_dates / linked_goal_ids`；报告 UI 额外传入 `weekday_freq / time_bucket_freq / linked_goal_summary`
+  - `period_label`：报告时间段文案
+  - `model_id`：必填，传给 `core.llm_client.call_llm`
+  - `sections`：`"all"` 或 `emotions / topics / patterns / goals / quotes` 子集
+- **返回**：
+  ```
+  {
+    "emotions": str | None,
+    "topics": str | None,
+    "patterns": str | None,
+    "goals": str | None,
+    "quotes": list[str],
+  }
+  ```
+- **副作用**：每个请求段独立调用 `call_llm` 并写 `llm_logs`；`quotes` 使用 `expect_json=True`，其他段使用纯文本；不调用 DB API，不持久化报告
+- **失败路径**：单段失败只把该段置空并继续；所有实际调用段均失败时 `success=False`；无关联目标时 `goals=None` 且跳过 LLM
+
+#### `run(self, session: dict, **kwargs) -> SkillResult`
+- 仅保留 `BaseSkill` 兼容入口；返回失败并提示使用批量 `execute()` 签名。
+
+### Prompt 依赖
+
+- `INSIGHT_REPORT_SYSTEM`
+- `INSIGHT_EMOTIONS_TMPL`（变量 `{period_label}` `{emotion_freq}` `{emotion_timeline}`）
+- `INSIGHT_TOPICS_TMPL`（变量 `{period_label}` `{topic_freq}` `{domain_freq}` `{snippets}`）
+- `INSIGHT_PATTERNS_TMPL`（变量 `{period_label}` `{record_count}` `{weekday_freq}` `{time_bucket_freq}`）
+- `INSIGHT_GOALS_TMPL`（变量 `{period_label}` `{goal_summary}`）
+- `INSIGHT_QUOTES_TMPL`（变量 `{period_label}` `{quote_candidates}`）
 
 ## completion_skill.py
 

@@ -22,6 +22,8 @@ def init_state() -> None:
         "semantic_results":      None,
         "semantic_query_used":   "",
         "insight_sub_tab":       "🔍 检索",
+        "insight_date_start":    None,
+        "insight_date_end":      None,
         "date_filter_exact":     None,
         "date_filter_fuzzy":     None,
         "date_filter_range":     ("", ""),
