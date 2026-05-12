@@ -1,4 +1,6 @@
-# 用户数据（个人文件和数据库，不纳入版本控制）
+# 访问密码（不提交到仓库，使用 secrets.toml.example 作为模板）
+.streamlit/secrets.toml
+
 data/
 vector_db/
 *.bak

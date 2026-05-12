@@ -44,8 +44,36 @@ _HOME_TARGETS = {
 }
 
 
+def _check_auth() -> None:
+    """密码门：secrets.toml 中配置 app_password 时启用，否则跳过（本地开发模式）。"""
+    try:
+        required = st.secrets["app_password"]
+    except (KeyError, FileNotFoundError, Exception):
+        return  # 未配置密码 → 本地开发模式，直接放行
+
+    if not required:
+        return
+
+    if st.session_state.get("_authenticated"):
+        return
+
+    _, col, _ = st.columns([1, 1.4, 1])
+    with col:
+        st.markdown("## 🔐 MyPresent")
+        st.markdown("请输入访问密码以继续")
+        pwd = st.text_input("密码", type="password", key="_auth_input", label_visibility="collapsed")
+        if st.button("进入", type="primary", use_container_width=True):
+            if pwd == required:
+                st.session_state["_authenticated"] = True
+                st.rerun()
+            else:
+                st.error("密码错误")
+    st.stop()
+
+
 def main() -> None:
-    st.set_page_config(page_title="灵感记录工具", page_icon="🗂️", layout="wide")
+    st.set_page_config(page_title="MyPresent", page_icon="🪞", layout="wide")
+    _check_auth()
     init_db()
     ensure_dirs()
     init_state()
