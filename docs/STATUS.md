@@ -4,7 +4,7 @@
 
 ## 当前版本
 
-`v5.0.0`（已发布）· 下一里程碑：Phase 6
+`v5.1.0`（已发布）· 下一里程碑：Phase 6
 
 ## 核心架构
 
@@ -18,14 +18,15 @@
 
 ## 当前焦点
 
-- **v5.0.0 已正式发布** ✅（Phase 5 全部完成）
+- **v5.1.0 已发布** ✅（洞见模块 + 规划台优化 + 远程访问支持）
+- Cloudflare Tunnel 配置中（待用户完成 DNS 切换）
 - 下一阶段：Phase 6（数据分析 + LLM 深化）
 
 ## 最近完成
 
-- **task-34~37 merge**：Bug 修复、标签体系重构、卡片重设计、分组图库升级
-- **task-29~33 merge**：title/summary 字段、AnalysisSkill、AI 分析面板、导航改造、规划台预填
-- **task-27~28 merge**：L-A-T label_registry、session_linked_goals、CRUD 接口扩展
+- **v5.1.0**：情绪热力矩阵、洞察报告、规划台多项优化、密码门 + Cloudflare Tunnel 准备
+- **task-38~39.5 merge**：规划台优化、标签体系改进、时长统计
+- **task-40~44 merge**：洞见 Tab、EmotionScoringSkill、热力矩阵、InsightReportSkill、报告 UI、待办预填
 
 ## 待办 / TODO
 
