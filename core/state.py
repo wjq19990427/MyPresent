@@ -58,6 +58,7 @@ def init_state() -> None:
         "planning_cal_date":      None,
         "planning_todo_adding":   False,
         "planning_activity_adding": False,
+        "planning_activity_prefill": None,
         "planning_record_moment_date": None,
         "_reflection_open":       {},
         "_postpone_open":         {},

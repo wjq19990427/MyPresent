@@ -463,6 +463,7 @@ def _reset_activity_form() -> None:
     ):
         st.session_state.pop(key, None)
     st.session_state.pop("_af_time_pair", None)
+    st.session_state["planning_activity_prefill"] = None
 
 
 def _load_month_activities(year: int, month: int) -> dict[str, list[dict]]:
@@ -684,8 +685,12 @@ def _render_activity_form(selected_date: str) -> None:
     if not st.session_state.get("planning_activity_adding"):
         return
 
+    had_prefill = _consume_activity_prefill()
+
     with st.container(border=True):
         st.markdown("#### 📝 记录今日事务")
+        if had_prefill:
+            st.info("💡 也可以只填时长（分钟）来快速记录，时间段为选填")
         description = st.text_area("事务描述 *", key="af_description")
         category = st.selectbox("分类 *", TODO_CATEGORIES, key="af_category")
         start_time, start_error = _render_time_select("开始时间", "af_start_time")
@@ -1119,14 +1124,53 @@ def _render_reflection_box(todo_id: str) -> None:
         ca, cb = st.columns(2)
         with ca:
             if st.button("✅ 确认完成", key=f"ref_ok_{todo_id}", type="primary"):
-                complete_todo(todo_id, reflection)
-                _close_reflection(todo_id)
-                st.rerun()
+                _complete_todo_and_prefill_activity(todo_id, reflection)
         with cb:
             if st.button("跳过", key=f"ref_skip_{todo_id}"):
-                complete_todo(todo_id, "")
-                _close_reflection(todo_id)
-                st.rerun()
+                _complete_todo_and_prefill_activity(todo_id, "")
+
+
+def _complete_todo_and_prefill_activity(todo_id: str, reflection: str) -> None:
+    todo = _find_todo_in_render_state(todo_id)
+    complete_todo(todo_id, reflection)
+    _close_reflection(todo_id)
+    if todo:
+        _reset_activity_form()
+        if not st.session_state.get("planning_activity_adding"):
+            st.session_state["planning_activity_adding"] = True
+        st.session_state["planning_todo_adding"] = False
+        target_date = str(todo.get("target_date") or "").strip()
+        if target_date:
+            st.session_state["planning_cal_date"] = target_date
+        st.session_state["planning_activity_prefill"] = {
+            "description": str(todo.get("content") or "").strip(),
+            "category": str(todo.get("category") or "").strip(),
+        }
+    st.rerun()
+
+
+def _find_todo_in_render_state(todo_id: str) -> dict | None:
+    year = st.session_state.get("planning_cal_year", datetime.now().year)
+    month = st.session_state.get("planning_cal_month", datetime.now().month)
+    for todo in get_calendar_todos(year=year, month=month):
+        if todo["id"] == todo_id:
+            return todo
+    return None
+
+
+def _consume_activity_prefill() -> bool:
+    prefill = st.session_state.get("planning_activity_prefill")
+    if not isinstance(prefill, dict):
+        return False
+
+    description = str(prefill.get("description") or "").strip()
+    category = str(prefill.get("category") or "").strip()
+    if description:
+        st.session_state["af_description"] = description
+    if category in TODO_CATEGORIES:
+        st.session_state["af_category"] = category
+    st.session_state["planning_activity_prefill"] = None
+    return True
 
 
 def _close_reflection(todo_id: str) -> None:
