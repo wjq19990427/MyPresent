@@ -304,18 +304,18 @@
 
 ### 公开 API
 
-#### `call_llm(system_prompt, user_prompt, *, model_id, expect_json=True, skill_name='', session_id='') -> str | dict`
+#### `call_llm(system_prompt, user_prompt, *, model_id, expect_json=True, skill_name='', session_id='') -> str | dict | list`
 - **用途**：Skill 层首选接口。把 system + user 拼成 messages 后转发给 `call()`
 - **返回**：
   - `expect_json=False` → `str`
-  - `expect_json=True`  → `dict`（解析后的 JSON）
+  - `expect_json=True`  → 解析后的 JSON；通常为 `dict`，当 prompt 明确要求 JSON 数组时可为 `list`
 - **异常**：
   - JSON 解析失败 → `LLMJsonParseError`（`ValueError` 子类）
   - 模型/Provider 未找到 → `ValueError`
   - 底层 SDK 异常（网络/认证）→ 原样冒泡
 - **副作用**：自动写 `llm_logs`（成功/失败均写）
 
-#### `call(messages: list[dict], model_id: str, *, expect_json=False, skill_name='', session_id='', max_retries=2) -> str | dict`
+#### `call(messages: list[dict], model_id: str, *, expect_json=False, skill_name='', session_id='', max_retries=2) -> str | dict | list`
 - **用途**：底层调用入口。给需要自定义 multi-turn messages 的场景使用
 - **JSON 重试机制**：`expect_json=True` 时若解析失败，把原始输出 + 重试提示追加到 messages 重发，最多 `max_retries` 次
 - **副作用**：写 `llm_logs`；成功只写一次（最终成功时刻）；失败写一次（最后一次失败）
@@ -405,6 +405,12 @@
 | `ANALYSIS_USER_TMPL` | 结构化分析 user | `{content}` `{fields}` `{registry_section}` `{hint_section}` |
 | `EMOTION_SCORING_SYSTEM` | 情绪强度评分 system | — |
 | `EMOTION_SCORING_USER_TMPL` | 情绪强度评分 user | `{emotions}` `{content}` |
+| `INSIGHT_REPORT_SYSTEM` | 洞察报告通用 system | — |
+| `INSIGHT_EMOTIONS_TMPL` | 洞察报告：情绪画像 user | `{period_label}` `{emotion_freq}` `{emotion_timeline}` |
+| `INSIGHT_TOPICS_TMPL` | 洞察报告：话题聚焦 user | `{period_label}` `{topic_freq}` `{domain_freq}` `{snippets}` |
+| `INSIGHT_PATTERNS_TMPL` | 洞察报告：行为规律 user | `{period_label}` `{record_count}` `{weekday_freq}` `{time_bucket_freq}` |
+| `INSIGHT_GOALS_TMPL` | 洞察报告：目标追踪 user | `{period_label}` `{goal_summary}` |
+| `INSIGHT_QUOTES_TMPL` | 洞察报告：代表语录 user | `{period_label}` `{quote_candidates}` |
 | `PLANNING_RECORD_MOMENT_SYSTEM` | 规划台「记录此刻」草稿生成 system | — |
 | `PLANNING_RECORD_MOMENT_USER_TMPL` | 规划台「记录此刻」草稿生成 user | `{date}` `{activities}` `{todos}` |
 | `QA_SYSTEM` | 智能问答 system | — |
@@ -499,7 +505,7 @@
 - **导航**：`active_tab` / `active_sub_tab` / `_nav_target`
 - **选择状态**：`pending_selected` / `archived_selected` / `search_selected`
 - **搜索**：`semantic_results` / `semantic_query_used` / `date_filter_exact` / `_fuzzy` / `_range` / `_search_mode_prev`
-- **洞见**：`insight_sub_tab`（默认 `"🔍 检索"`）
+- **洞见**：`insight_sub_tab`（默认 `"🔍 检索"`）/ `insight_date_start` / `insight_date_end`
 - **已归档视图/过滤**：`archived_view_mode`（默认 `"all"`）/ `archived_group_selected`（默认 `None`）/ `archived_type_filter` / `archived_tag_filter` / `archived_group_filter` / `_show_no_tag_only`
 - **文件夹批量导入**：`folder_selected_path` / `folder_scan_results` / `folder_scan_skipped_n` / `folder_import_done`
 - **上传预填**：`upload_prefill`

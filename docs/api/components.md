@@ -235,14 +235,28 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 ## tab_insight.py
 
-> 「🪞 洞见」Tab。提供洞见内部子页框架。
+> 「🪞 洞见」Tab。提供洞见内部子页框架与洞察报告 UI。
 
 ### `render_insight_tab() -> None`
 - **功能**：通过 `insight_sub_tab` 渲染三个内部子页：「🔍 检索」/「🌈 情绪趋势」/「📋 洞察报告」
 - **检索子页**：直接调用 `tab_search.render_search_tab()`，保持原日期过滤 / 语义检索 / 智能问答行为不变
-- **占位子页**：「🌈 情绪趋势」显示 `情绪趋势功能即将上线`；「📋 洞察报告」显示 `洞察报告功能即将上线`
-- **依赖 session_state**：`insight_sub_tab`
-- **约束**：本模块只做子页导航与占位，不实现情绪趋势或洞察报告业务逻辑
+- **情绪趋势子页**：仍显示 `情绪趋势功能即将上线`
+- **洞察报告子页**：渲染时间范围、评分模式、模型选择、「一键生成全部」与五个报告段落 expander
+- **依赖 session_state**：`insight_sub_tab` / `insight_date_start` / `insight_date_end` / `_insight_report_{section}` / `_insight_report_signature`
+- **约束**：报告内容仅缓存在 `session_state`，不写 DB；业务生成委托 `InsightReportSkill`
+
+### 洞察报告子页
+
+- **数据来源**：UI 调 `load_db()` 读取 final sessions，根据 `content_time` 过滤时间范围；目标关联只通过 `get_linked_goals_for_session()` 读取后汇总进 `stats`
+- **统计预计算**：调用 Skill 前组装 `emotion_scores / emotion_freq / topic_freq / domain_freq / record_dates / linked_goal_ids / weekday_freq / time_bucket_freq / linked_goal_summary`
+- **评分模式**：
+  - `快速`：调用 `EmotionScoringSkill.score_quick(sessions)`
+  - `精准`：调用 `EmotionScoringSkill.score_precise(sessions, model_id)`
+- **报告段落**：`🌈 情绪画像` / `🗺️ 话题聚焦` / `🔄 行为规律` / `🎯 目标追踪` / `💬 代表语录`
+- **交互**：一键生成顺序请求全部段；每个 expander 内的生成/重新生成只请求对应 section，不清空其他缓存
+- **缓存失效**：时间范围、评分模式或过滤后的 session id 集合变化时清空 `_insight_report_*`
+- **目标段**：当前时段无关联目标时显示 `本时段无关联目标记录`，不触发目标段 LLM
+- **代表语录**：按引用块展示 `quotes` 数组
 
 ---
 

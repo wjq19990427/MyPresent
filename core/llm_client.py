@@ -1,8 +1,8 @@
 """统一 LLM 调用层：JSON 校验、自动重试、调用日志。
 
 对外接口：
-  call_llm(system_prompt, user_prompt, *, model_id, expect_json, skill_name, session_id) -> str | dict
-  call(messages, model_id, *, expect_json, skill_name, session_id) -> str | dict
+  call_llm(system_prompt, user_prompt, *, model_id, expect_json, skill_name, session_id) -> str | dict | list
+  call(messages, model_id, *, expect_json, skill_name, session_id) -> str | dict | list
   call_with_config(messages, model, provider) -> str   # 用于连通性测试
 """
 from __future__ import annotations
@@ -28,7 +28,7 @@ def call(
     skill_name: str = "",
     session_id: str = "",
     max_retries: int = 2,
-) -> str | dict:
+) -> str | dict | list:
     """统一调用入口。
 
     expect_json=True 时解析并校验 JSON 输出，失败自动追加重试提示（最多 max_retries 次）。
@@ -149,7 +149,7 @@ def call_llm(
     expect_json: bool = True,
     skill_name: str = "",
     session_id: str = "",
-) -> "str | dict":
+) -> "str | dict | list":
     """简化调用接口：直接传入 system/user prompt 字符串。
 
     等价于 call([system, user], model_id, ...)，供 Skill 层优先使用。
@@ -173,8 +173,8 @@ def call_llm(
         raise
 
 
-def _parse_json(text: str) -> dict:
-    """从 LLM 输出中提取 JSON 对象，容忍 markdown 代码块包裹。"""
+def _parse_json(text: str) -> dict | list:
+    """从 LLM 输出中提取 JSON，容忍 markdown 代码块包裹。"""
     text = text.strip()
     if text.startswith("```"):
         lines = text.splitlines()

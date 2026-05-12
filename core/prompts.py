@@ -131,6 +131,79 @@ EMOTION_SCORING_USER_TMPL = """\
 请返回每一种候选情绪的强度 JSON。\
 """
 
+# ─── 洞察报告（InsightReportSkill） ───────────────────────────────────────────
+
+INSIGHT_REPORT_SYSTEM = """\
+你是一位私人成长分析助手，正在帮助用户回看一段时间内的个人记录。
+
+输出风格：
+- 使用第一人称，好像用户在复盘自己的生活
+- 真实、克制、具体，不夸张，不做诊断
+- 只基于提供的数据和片段，不虚构事实
+- 不要使用标题、项目符号或额外说明，除非用户模板明确要求 JSON\
+"""
+
+INSIGHT_EMOTIONS_TMPL = """\
+时间段：{period_label}
+
+情绪出现频次 Top5：
+{emotion_freq}
+
+情绪强度时序摘要：
+{emotion_timeline}
+
+请生成 100-150 字的情绪画像，描述这段时间的主要情绪特征和变化。\
+"""
+
+INSIGHT_TOPICS_TMPL = """\
+时间段：{period_label}
+
+话题出现频次 Top5：
+{topic_freq}
+
+领域出现频次：
+{domain_freq}
+
+相关记录片段：
+{snippets}
+
+请生成 100-150 字的话题聚焦分析，描述这段时间我主要把注意力放在哪里。\
+"""
+
+INSIGHT_PATTERNS_TMPL = """\
+时间段：{period_label}
+
+有效记录日期数：{record_count}
+
+星期分布：
+{weekday_freq}
+
+时段分布：
+{time_bucket_freq}
+
+请生成 80-120 字的行为规律分析，描述我的记录习惯与生活节奏线索。\
+"""
+
+INSIGHT_GOALS_TMPL = """\
+时间段：{period_label}
+
+关联年度目标与记录数量：
+{goal_summary}
+
+请生成 80-120 字的目标追踪分析，描述这些记录反映出的目标推进情况。\
+"""
+
+INSIGHT_QUOTES_TMPL = """\
+时间段：{period_label}
+
+候选原文片段：
+{quote_candidates}
+
+请从候选片段中选择 1-3 条最能代表这段时间状态的原文句子。
+
+严格返回 JSON 数组，数组元素必须是候选片段中的原文字符串，不要改写、不要新增、不要输出其他文字。\
+"""
+
 # ─── 规划台记录草稿（Planning → Upload prefill） ──────────────────────────────
 
 PLANNING_RECORD_MOMENT_SYSTEM = """\
