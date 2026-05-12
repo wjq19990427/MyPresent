@@ -365,7 +365,7 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 #### `_render_calendar_todos() -> None`
 - **功能**：月份导航、周一到周日的方格月历、日期选择、日期内待办摘要、事务数量提示、本月事务时长统计、选中日期的待办事宜与今日事务、整月待办列表、新增待办入口
-- **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding`
+- **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `planning_activity_prefill`
 - **过期迁移**：当当前渲染月份与上次迁移月份不同时，调用 `migrate_overdue_todos(year, month)`；迁移数大于 0 时在顶部显示一次性提示
 - **视觉约定**：星期标题与日期格共用同一列规格；日期格使用 HTML 信息块展示日期数字、最多 3 条待办摘要和今日事务数量提示；待办摘要前置小号彩色边框优先级标签；待办与事务之间用分隔线区分，超出显示 `+N 更多`；今日和选中日期有不同高亮
 - **交互约定**：选中具体日期后新增待办默认填入该日期；日期视图提供返回月份视图入口，清空 `planning_cal_date`
@@ -389,7 +389,7 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 #### `_render_todo_row(todo: dict) -> None`
 - **功能**：单条待办展示、完成 checkbox、编辑、延期、删除、完成复盘、已完成心得展示
 - **编辑流程**：点击「编辑」打开内联表单，字段与新增一致（内容 / 分类 / 优先级 / 日期 / 重复 / 关联年度目标）；保存调用 `update_calendar_todo()`，同一时间只保留一个 `_todo_editing_{todo_id}` 为打开状态
-- **完成流程**：勾选未完成待办时打开复盘输入；确认或跳过后调用 `complete_todo()`；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
+- **完成流程**：勾选未完成待办时打开复盘输入；确认或跳过后调用 `complete_todo()`，切到该待办日期并打开今日事务表单，写入 `planning_activity_prefill={"description": todo["content"], "category": todo["category"]}`；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
 - **延期流程**：仅未完成待办显示「延期」入口；展开内联表单后确认调用 `postpone_todo()`；`postpone_count > 0` 时信息行显示延期次数
 - **依赖 session_state**：`_reflection_open` / `_postpone_open` / `_todo_editing_{todo_id}`
 
@@ -397,6 +397,7 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 - **渲染条件**：仅在选中具体日期时显示
 - **功能**：展示该日今日事务列表；提供「记录今日事务」入口；新增表单字段为 `description/category/start_time/end_time/duration`
 - **时间段**：开始/结束时间为可选下拉，提供 00:00 到 23:30 的 30 分钟刻度与「自定义…」；自定义校验 `HH:MM`，两端均填写时自动计算分钟数并写入 duration，用户仍可手动覆盖
+- **预填行为**：事务表单渲染 widget 前消费 `planning_activity_prefill`；若存在则写入 `af_description` / `af_category` 默认值，显示时长填写提示，并立即清空该预填状态
 - **统计约定**：事务列表下方、记录此刻提示上方显示当日分类时长汇总；跳过 `duration=0` 的事务，所有事务均无有效时长时隐藏汇总
 - **副作用**：保存时调用 `create_daily_activity()`；删除时调用 `delete_daily_activity()`；保存/取消后关闭表单；保存成功后写 `planning_record_moment_date` 以显示「记录此刻」入口
 - **记录此刻**：保存事务后在当日事务列表下方内联显示「📝 记录此刻的想法？」；点「不了」清空提示状态；点「去记录」调用 `core.llm_client.call_llm(expect_json=False)` 生成草稿，写入 `upload_prefill={"description": ..., "topics": ..., "source": "planning"}`，再设置 `_nav_target=("📝 记录台", "⬆️ 上传")` 跳转到上传页
