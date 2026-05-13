@@ -391,6 +391,7 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 - **过期迁移**：当当前渲染月份与上次迁移月份不同时，调用 `migrate_overdue_todos(year, month)`；迁移数大于 0 时在顶部显示一次性提示
 - **视觉约定**：星期标题与日期格共用同一列规格；日期格使用 HTML 信息块展示日期数字、最多 3 条待办摘要和今日事务数量提示；待办摘要前置小号彩色边框优先级标签；待办与事务之间用分隔线区分，超出显示 `+N 更多`；今日和选中日期有不同高亮
 - **交互约定**：选中具体日期后新增待办默认填入该日期；日期视图提供返回月份视图入口，清空 `planning_cal_date`
+- **过滤约定**：月历格与月份模式的整月待办列表只展示未完成待办；选中具体日期后的待办列表仍展示全部待办
 - **统计约定**：月历下方固定渲染 `📊 本月时长统计` 折叠面板，数据来自 `get_monthly_activity_stats(year, month)`；无事务记录时显示 `本月暂无事务记录`
 - **注意**：重复规则只存储和展示，不在 UI 层自动生成实例；重复任务不参与跨月自动迁移
 
@@ -411,9 +412,9 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 #### `_render_todo_row(todo: dict) -> None`
 - **功能**：单条待办展示、完成 checkbox、编辑、延期、删除、完成复盘、已完成心得展示
 - **编辑流程**：点击「编辑」打开内联表单，字段与新增一致（内容 / 分类 / 优先级 / 日期 / 重复 / 关联年度目标）；保存调用 `update_calendar_todo()`，同一时间只保留一个 `_todo_editing_{todo_id}` 为打开状态
-- **完成流程**：勾选未完成待办时打开复盘输入；确认或跳过后调用 `complete_todo()`，切到该待办日期并打开今日事务表单，写入 `planning_activity_prefill={"description": todo["content"], "category": todo["category"]}`；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
+- **完成流程**：月份模式下勾选未完成待办时沿用复盘输入；确认或跳过后调用 `complete_todo()`，切到该待办日期并打开今日事务表单，写入 `planning_activity_prefill={"description": todo["content"], "category": todo["category"]}`；选中具体日期时勾选未完成待办会打开完成表单，包含小时下拉、分钟下拉与选填复盘，确认后调用 `complete_todo()`，若小时和分钟均已选择则调用 `create_daily_activity(selected_date, todo["content"], todo["category"], start_time="HH:MM")` 自动生成事务；跳过只完成待办不创建事务；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
 - **延期流程**：仅未完成待办显示「延期」入口；展开内联表单后确认调用 `postpone_todo()`；`postpone_count > 0` 时信息行显示延期次数
-- **依赖 session_state**：`_reflection_open` / `_postpone_open` / `_todo_editing_{todo_id}`
+- **依赖 session_state**：`_reflection_open` / `_postpone_open` / `_todo_editing_{todo_id}` / `_compl_hour_{todo_id}` / `_compl_min_{todo_id}`
 
 #### `_render_daily_activities(selected_date: str, activities: list[dict], todos: list[dict]) -> None`
 - **渲染条件**：仅在选中具体日期时显示
