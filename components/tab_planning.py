@@ -307,6 +307,8 @@ def _render_calendar_todos() -> None:
     todos = get_calendar_todos(year=year, month=month)
     day_map: dict[str, list[dict]] = defaultdict(list)
     for todo in todos:
+        if todo["status"] == "已完成":
+            continue
         day_map[todo["target_date"]].append(todo)
     activity_map = _load_month_activities(year, month)
 
@@ -336,7 +338,7 @@ def _render_calendar_todos() -> None:
         display_activities = activity_map.get(selected_date, [])
     else:
         st.markdown(f"#### 📋 {year} 年 {month} 月全部待办")
-        display_todos = todos
+        display_todos = [t for t in todos if t["status"] != "已完成"]
         display_activities = []
 
     action_cols = st.columns([1, 1.4, 3.6] if selected_date else [1, 5])
@@ -1113,6 +1115,11 @@ def _close_all_todo_editors() -> None:
 
 
 def _render_reflection_box(todo_id: str) -> None:
+    selected_date = st.session_state.get("planning_cal_date")
+    if selected_date:
+        _render_completion_activity_box(todo_id, selected_date)
+        return
+
     with st.container(border=True):
         st.caption("🎉 完成了！记录一下心得吧（选填）")
         reflection = st.text_area(
@@ -1128,6 +1135,71 @@ def _render_reflection_box(todo_id: str) -> None:
         with cb:
             if st.button("跳过", key=f"ref_skip_{todo_id}"):
                 _complete_todo_and_prefill_activity(todo_id, "")
+
+
+def _render_completion_activity_box(todo_id: str, selected_date: str) -> None:
+    with st.container(border=True):
+        st.caption("🎉 完成了！选择开始时间并记录一下心得吧（选填）")
+        time_options = [""] + [f"{i:02d}" for i in range(24)]
+        minute_options = [""] + [f"{i:02d}" for i in range(60)]
+        time_cols = st.columns(2)
+        with time_cols[0]:
+            hour = st.selectbox(
+                "小时",
+                time_options,
+                format_func=lambda value: value or "未选",
+                key=f"_compl_hour_{todo_id}",
+            )
+        with time_cols[1]:
+            minute = st.selectbox(
+                "分钟",
+                minute_options,
+                format_func=lambda value: value or "未选",
+                key=f"_compl_min_{todo_id}",
+            )
+        reflection = st.text_area(
+            "完成心得",
+            key=f"ref_{todo_id}",
+            placeholder="这件事给我带来了...",
+        )
+        ca, cb = st.columns(2)
+        with ca:
+            if st.button("✅ 确认完成", key=f"ref_ok_{todo_id}", type="primary"):
+                _complete_todo_with_activity_time(
+                    todo_id, selected_date, reflection, hour, minute
+                )
+        with cb:
+            if st.button("跳过", key=f"ref_skip_{todo_id}"):
+                _complete_todo_only(todo_id, "")
+
+
+def _complete_todo_with_activity_time(
+    todo_id: str,
+    selected_date: str,
+    reflection: str,
+    hour: str,
+    minute: str,
+) -> None:
+    todo = _find_todo_in_render_state(todo_id)
+    complete_todo(todo_id, reflection)
+    if todo and hour and minute:
+        create_daily_activity(
+            selected_date,
+            str(todo.get("content") or "").strip(),
+            str(todo.get("category") or "").strip(),
+            start_time=f"{hour}:{minute}",
+        )
+        st.session_state["planning_record_moment_date"] = selected_date
+    _close_reflection(todo_id)
+    _reset_completion_time(todo_id)
+    st.rerun()
+
+
+def _complete_todo_only(todo_id: str, reflection: str) -> None:
+    complete_todo(todo_id, reflection)
+    _close_reflection(todo_id)
+    _reset_completion_time(todo_id)
+    st.rerun()
 
 
 def _complete_todo_and_prefill_activity(todo_id: str, reflection: str) -> None:
@@ -1177,6 +1249,12 @@ def _close_reflection(todo_id: str) -> None:
     reflection_state = st.session_state.get("_reflection_open", {})
     reflection_state.pop(todo_id, None)
     st.session_state["_reflection_open"] = reflection_state
+    _reset_completion_time(todo_id)
+
+
+def _reset_completion_time(todo_id: str) -> None:
+    st.session_state.pop(f"_compl_hour_{todo_id}", None)
+    st.session_state.pop(f"_compl_min_{todo_id}", None)
 
 
 def _render_postpone_box(todo_id: str) -> None:
