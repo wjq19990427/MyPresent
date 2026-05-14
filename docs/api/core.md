@@ -34,7 +34,7 @@
 
 #### `init_db() -> None`
 - **用途**：创建库 + 全部表（如不存在）+ 灌入 `DEFAULT_TAGS` / `label_registry` 系统种子
-- **副作用**：写 `data/database.db`；幂等
+- **副作用**：写当前配置解析出的 SQLite DB；local 模式为 `data/database.db`，cloud 模式为 `data/users/{username}/database.db`；连接前会创建 DB 父目录；幂等
 - **调用时机**：`app.py` 启动 / `migrate.py`
 - **迁移行为**：幂等补齐 `sessions.domains/attributes/topics/emotion_tags/emotion_note/title/summary` 七列；对空 `title` 用 `description[:20]` 回填（不重算历史 `is_complete`），并自动调用 `migrate_tags_to_topics()`
 
@@ -294,6 +294,8 @@
 ### 不变量
 
 - 所有公开函数自管事务（`_conn()` 上下文）；异常自动 rollback
+- `_conn()` 通过 `config.get_db_path(config.get_current_user())` 动态选择数据库路径；local 模式保持 `data/database.db`，cloud 模式要求先设置当前用户，并使用 `data/users/{username}/database.db`
+- `_conn()` 连接前会创建数据库父目录；路径解析函数本身不创建目录
 - Final 记录的字段更新会**自动**触发 `.md` 重写 + embedding 重建——上层无需手动同步
 - `_conn()` / `_load_aux()` / `_row_to_dict()` / `_missing_fields()` / `_is_text_session()` 为内部函数，禁止外部 import
 

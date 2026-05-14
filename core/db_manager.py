@@ -13,9 +13,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Generator
 
+from . import config
 from .constants import (
     ATTRIBUTES,
-    DB_PATH,
     DEFAULT_TAGS,
     DOMAINS,
     EMOTIONS,
@@ -198,8 +198,9 @@ CREATE TABLE IF NOT EXISTS session_linked_goals (
 
 
 def init_db() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DB_PATH) as conn:
+    db_path = config.get_db_path(config.get_current_user())
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         conn.executescript(_SCHEMA)
         _cols = {r[1] for r in conn.execute("PRAGMA table_info(sessions)")}
@@ -332,8 +333,9 @@ def migrate_tags_to_topics() -> int:
 
 @contextmanager
 def _conn() -> Generator[sqlite3.Connection, None, None]:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
+    db_path = config.get_db_path(config.get_current_user())
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    con = sqlite3.connect(db_path)
     con.execute("PRAGMA foreign_keys=ON")
     con.row_factory = sqlite3.Row
     try:
