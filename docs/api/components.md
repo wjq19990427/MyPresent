@@ -282,13 +282,14 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 ### 内部子组件
 
-- `_render_date_filter()`：用 ChromaDB metadata filter（`has_exact_date` + `content_time_num` 范围）；模糊时间记录单独折叠展示；下方支持「✨ 生成阶段回忆录」（调 `StorySkill.run_period`）
-- `_render_semantic_search()`：BGE 非对称查询前缀「为这个句子生成表示以用于检索相关文章：」+ Top-K
-- `_render_qa()`：multi-turn chat，调 `llm_client.call(history, model_id)`；失败时弹错误并 `pop` 最后一条 user 消息保持历史一致性
+- `_render_date_filter()`：`EMBEDDING_ENABLED=true` 时用 ChromaDB metadata filter（`has_exact_date` + `content_time_num` 范围）；禁用 embedding 时回退到 `load_db()` 的普通日期筛选，不加载向量库；模糊时间记录单独折叠展示；下方支持「✨ 生成阶段回忆录」（调 `StorySkill.run_period`）
+- `_render_semantic_search()`：`EMBEDDING_ENABLED=false` 时仅显示 `向量搜索功能当前未启用（EMBEDDING_ENABLED=false）。`；启用时使用 BGE 非对称查询前缀「为这个句子生成表示以用于检索相关文章：」+ Top-K
+- `_render_qa()`：`EMBEDDING_ENABLED=false` 时仅显示 `向量搜索功能当前未启用（EMBEDDING_ENABLED=false）。`；启用时 multi-turn chat，调 `llm_client.call(history, model_id)`；失败时弹错误并 `pop` 最后一条 user 消息保持历史一致性
 
 ### 已知陷阱
 
 - `_render_qa` / `_render_semantic_search` 直接 import `vector_db._get_collection / _get_embedder` —— 跨层下划线 API 调用，是技术债
+- 禁用 embedding 时，模块级 import `_get_collection / _get_embedder` 仍安全；只要渲染路径不调用它们，就不会加载模型或 ChromaDB
 - 模式切换会丢弃所有已有结果（包括语义检索的耗时计算）——故意为之，避免界面状态混乱
 
 ---

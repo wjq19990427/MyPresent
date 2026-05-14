@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from core.constants import EMBEDDING_ENABLED
 from core.db_manager import init_db
 from core.file_io import ensure_dirs
 from core.state import init_state
@@ -77,7 +78,8 @@ def main() -> None:
     init_db()
     ensure_dirs()
     init_state()
-    _ensure_indexed()
+    if EMBEDDING_ENABLED:
+        _ensure_indexed()
 
     _consume_nav_target()
     selected = _render_nav(_NAV_ITEMS, "active_tab")

@@ -5,18 +5,25 @@ from datetime import datetime
 
 import streamlit as st
 
-from .constants import VECTOR_DB_DIR
+from .constants import EMBEDDING_ENABLED, VECTOR_DB_DIR
 from .db_manager import load_db
+
+# TODO: 当 EMBEDDING_BACKEND=api 时，替换 _get_embedder() 为远程 API 调用
+# 接口草案：embed_via_api(texts: list[str]) -> list[list[float]]
 
 
 @st.cache_resource(show_spinner="正在加载 Embedding 模型（首次需要下载，请稍候）…")
 def _get_embedder():
+    if not EMBEDDING_ENABLED:
+        raise RuntimeError("Embedding 已禁用")
     from sentence_transformers import SentenceTransformer
     return SentenceTransformer("BAAI/bge-small-zh-v1.5")
 
 
 @st.cache_resource(show_spinner="正在初始化向量数据库…")
 def _get_collection():
+    if not EMBEDDING_ENABLED:
+        raise RuntimeError("Embedding 已禁用")
     import chromadb
     client = chromadb.PersistentClient(path=str(VECTOR_DB_DIR))
     return client.get_or_create_collection(
@@ -69,6 +76,8 @@ def _build_chroma_metadata(session: dict) -> dict:
 
 
 def embed_session(session: dict) -> None:
+    if not EMBEDDING_ENABLED:
+        return
     try:
         text = _build_embed_text(session)
         if not text.strip():
@@ -87,6 +96,8 @@ def embed_session(session: dict) -> None:
 
 
 def delete_embedding(session_id: str) -> None:
+    if not EMBEDDING_ENABLED:
+        return
     try:
         _get_collection().delete(ids=[session_id])
     except Exception:
@@ -94,6 +105,8 @@ def delete_embedding(session_id: str) -> None:
 
 
 def index_existing_finals() -> int:
+    if not EMBEDDING_ENABLED:
+        return 0
     db     = load_db()
     finals = [s for s in db if s.get("status") == "final"]
     if not finals:
@@ -106,6 +119,8 @@ def index_existing_finals() -> int:
 
 
 def _ensure_indexed() -> None:
+    if not EMBEDDING_ENABLED:
+        return
     if st.session_state.get("_vector_db_ready"):
         return
     st.session_state["_vector_db_ready"] = True

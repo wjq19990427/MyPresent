@@ -351,20 +351,31 @@
 
 > ChromaDB（cosine）+ BGE 中文 embedding。所有公开 API **静默吞异常**——搜索功能可降级，主流程不阻断。
 
+### 功能开关
+
+- `core.constants.EMBEDDING_ENABLED` 从环境变量 `EMBEDDING_ENABLED` 读取，缺省为 `true`
+- 当 `EMBEDDING_ENABLED=false` 时：
+  - `embed_session()` / `delete_embedding()` 立即 return
+  - `index_existing_finals()` 返回 `0`
+  - `_ensure_indexed()` 立即 return
+  - `_get_embedder()` / `_get_collection()` 若被调用，抛 `RuntimeError("Embedding 已禁用")`
+  - 任何路径都不得加载 `sentence-transformers` 或初始化 `chromadb.PersistentClient`
+- API embedding 预留位在 `vector_db.py` 顶部注释中，当前不实现远程 embedding
+
 ### 公开 API
 
 #### `embed_session(session: dict) -> None`
 - **用途**：把 session 的可索引字段（`content_time / description / feeling / reason / tags`）upsert 进向量库
-- **副作用**：写 `vector_db/`；任何异常静默吞掉（不抛、不日志）
+- **副作用**：写 `vector_db/`；任何异常静默吞掉（不抛、不日志）；`EMBEDDING_ENABLED=false` 时无副作用
 - **不变量**：embedding 文本为空时静默跳过；`session["session_id"]` 必须存在
 - **被谁调用**：`db_manager.update_session_fields` / `update_session_tags` / `file_io.save_session_final` / `file_io.move_to_final`
 
 #### `delete_embedding(session_id: str) -> None`
-- **副作用**：从向量库删条目；异常静默吞
+- **副作用**：从向量库删条目；异常静默吞；`EMBEDDING_ENABLED=false` 时无副作用
 
 #### `index_existing_finals() -> int`
 - **用途**：批量补全所有 Final 记录的索引（启动检查 / 手动重建）
-- **返回**：本次新增索引的条数（已存在不重复）
+- **返回**：本次新增索引的条数（已存在不重复）；`EMBEDDING_ENABLED=false` 时返回 `0`
 
 ### 半公开（仅 `app.py` / `core/state` 链上调用）
 
@@ -372,6 +383,7 @@
 - 启动时调一次：metadata 缺 `content_time_num` 字段（旧 schema）则全库重建，否则只补未索引
 - 用 `st.session_state["_vector_db_ready"]` 单次哨兵保护，多页面切换不会重复执行
 - 失败时 `st.warning`，不抛异常
+- `app.py` 仅在 `EMBEDDING_ENABLED=true` 时调用；函数自身也有禁用保护
 
 ### embedding metadata 字段
 
@@ -541,6 +553,12 @@
 ## constants.py
 
 > 路径、文件格式、UI 列数、默认标签、`FIELD_SCHEMA` 扩展接口。零内部依赖。
+
+### 环境开关
+
+| 常量 | 环境变量 | 缺省 | 说明 |
+|------|----------|------|------|
+| `EMBEDDING_ENABLED` | `EMBEDDING_ENABLED` | `true` | 设为 `false/0/no/off` 时禁用本地 embedding 与向量库加载 |
 
 ### 路径
 
