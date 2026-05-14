@@ -5,7 +5,8 @@ from datetime import datetime
 
 import streamlit as st
 
-from .constants import EMBEDDING_ENABLED, VECTOR_DB_DIR
+from . import config
+from .constants import EMBEDDING_ENABLED
 from .db_manager import load_db
 
 # TODO: 当 EMBEDDING_BACKEND=api 时，替换 _get_embedder() 为远程 API 调用
@@ -21,15 +22,22 @@ def _get_embedder():
 
 
 @st.cache_resource(show_spinner="正在初始化向量数据库…")
-def _get_collection():
+def _get_collection_for_user(username: str):
     if not EMBEDDING_ENABLED:
         raise RuntimeError("Embedding 已禁用")
     import chromadb
-    client = chromadb.PersistentClient(path=str(VECTOR_DB_DIR))
+    vector_dir = config.get_vector_db_dir(None if username == "__local__" else username)
+    vector_dir.mkdir(parents=True, exist_ok=True)
+    client = chromadb.PersistentClient(path=str(vector_dir))
     return client.get_or_create_collection(
         name="sessions",
         metadata={"hnsw:space": "cosine"},
     )
+
+
+def _get_collection():
+    username = "__local__" if config.DEPLOY_MODE == "local" else config.get_current_user()
+    return _get_collection_for_user(username or "")
 
 
 def _build_embed_text(session: dict) -> str:
@@ -119,6 +127,11 @@ def index_existing_finals() -> int:
 
 
 def _ensure_indexed() -> None:
+    if config.DEPLOY_MODE == "cloud" and EMBEDDING_ENABLED:
+        st.warning(
+            "⚠️ 警告：cloud 模式下启用了本地 Embedding 模型，可能导致服务器内存溢出（OOM）。"
+            "建议将 EMBEDDING_ENABLED 设为 false 并改用 API 进行向量化。"
+        )
     if not EMBEDDING_ENABLED:
         return
     if st.session_state.get("_vector_db_ready"):

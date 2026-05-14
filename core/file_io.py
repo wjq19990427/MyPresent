@@ -5,9 +5,9 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+from . import config
 from .constants import (
-    FINAL_DIR, PENDING_DIR, FIELD_SCHEMA,
-    IMAGE_EXTS, VIDEO_EXTS, VECTOR_DB_DIR,
+    FIELD_SCHEMA, IMAGE_EXTS, VIDEO_EXTS,
 )
 from .db_manager import (
     create_session, set_session_status, update_session_files, get_session,
@@ -31,10 +31,10 @@ def _session_file_type(session: dict) -> str:
 
 
 def ensure_dirs() -> None:
-    for base in (FINAL_DIR, PENDING_DIR):
+    for base in (_final_dir(), _pending_dir()):
         for sub in ("images", "videos", "text"):
             (base / sub).mkdir(parents=True, exist_ok=True)
-    VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
+    _vector_db_dir().mkdir(parents=True, exist_ok=True)
 
 
 def _write_files(
@@ -99,7 +99,9 @@ def _write_md(session: dict) -> None:
                 )
             lines.append("\n")
 
-    (FINAL_DIR / f"{session['session_id']}.md").write_text(
+    final_dir = _final_dir()
+    final_dir.mkdir(parents=True, exist_ok=True)
+    (final_dir / f"{session['session_id']}.md").write_text(
         "".join(lines), encoding="utf-8"
     )
 
@@ -117,7 +119,7 @@ def save_session_pending(
     summary: str = "",
 ) -> None:
     sid          = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    file_entries = _write_files(file_data_list, PENDING_DIR, sid)
+    file_entries = _write_files(file_data_list, _pending_dir(), sid)
     create_session(
         sid,
         file_entries,
@@ -147,7 +149,7 @@ def save_session_final(
 ) -> None:
     from .vector_db import embed_session
     sid          = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    file_entries = _write_files(file_data_list, FINAL_DIR, sid)
+    file_entries = _write_files(file_data_list, _final_dir(), sid)
     now          = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     session      = create_session(
         sid, file_entries, source_type, field_values,
@@ -169,10 +171,11 @@ def move_to_final(session_id: str) -> None:
     if not session:
         return
     updated_files = []
+    final_dir = _final_dir()
     for fe in session["files"]:
         src  = Path(fe["path"])
         sub  = _file_subdir(fe["filename"])
-        dest = FINAL_DIR / sub / fe["filename"]
+        dest = final_dir / sub / fe["filename"]
         dest.parent.mkdir(parents=True, exist_ok=True)
         if src.exists():
             shutil.move(str(src), str(dest))
@@ -216,3 +219,15 @@ def import_folder_to_pending(
                 save_session_pending([(fh, fp.name)], "file", {}, tags=tags)
             count += 1
         return count
+
+
+def _pending_dir() -> Path:
+    return config.get_pending_dir(config.get_current_user())
+
+
+def _final_dir() -> Path:
+    return config.get_final_dir(config.get_current_user())
+
+
+def _vector_db_dir() -> Path:
+    return config.get_vector_db_dir(config.get_current_user())

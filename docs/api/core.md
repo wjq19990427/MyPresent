@@ -364,12 +364,13 @@
   - `_get_embedder()` / `_get_collection()` 若被调用，抛 `RuntimeError("Embedding 已禁用")`
   - 任何路径都不得加载 `sentence-transformers` 或初始化 `chromadb.PersistentClient`
 - API embedding 预留位在 `vector_db.py` 顶部注释中，当前不实现远程 embedding
+- `DEPLOY_MODE="cloud"` 且 `EMBEDDING_ENABLED=true` 时，`_ensure_indexed()` 入口展示 OOM 风险警告但继续执行
 
 ### 公开 API
 
 #### `embed_session(session: dict) -> None`
 - **用途**：把 session 的可索引字段（`content_time / description / feeling / reason / tags`）upsert 进向量库
-- **副作用**：写 `vector_db/`；任何异常静默吞掉（不抛、不日志）；`EMBEDDING_ENABLED=false` 时无副作用
+- **副作用**：写当前用户的向量库；local 模式为 `vector_db/`，cloud 模式为 `data/users/{username}/vector_db/`；任何异常静默吞掉（不抛、不日志）；`EMBEDDING_ENABLED=false` 时无副作用
 - **不变量**：embedding 文本为空时静默跳过；`session["session_id"]` 必须存在
 - **被谁调用**：`db_manager.update_session_fields` / `update_session_tags` / `file_io.save_session_final` / `file_io.move_to_final`
 
@@ -381,6 +382,12 @@
 - **返回**：本次新增索引的条数（已存在不重复）；`EMBEDDING_ENABLED=false` 时返回 `0`
 
 ### 半公开（仅 `app.py` / `core/state` 链上调用）
+
+#### `_get_collection()`
+- **用途**：返回当前用户对应的 ChromaDB collection
+- **路径规则**：local 模式固定转发到 `_get_collection_for_user("__local__")`；cloud 模式读取 `config.get_current_user()` 并转发到 `_get_collection_for_user(username)`
+- **缓存规则**：底层 `_get_collection_for_user(username)` 使用 `@st.cache_resource`，username 是 cache key；不同 cloud 用户互不共享 collection 实例
+- **异常**：`EMBEDDING_ENABLED=false` 时抛 `RuntimeError("Embedding 已禁用")`；cloud 模式未设置用户时由 `config` 抛 `RuntimeError("Cloud 模式下未设置当前用户")`
 
 #### `_ensure_indexed() -> None`
 - 启动时调一次：metadata 缺 `content_time_num` 字段（旧 schema）则全库重建，否则只补未索引
@@ -400,7 +407,7 @@
 - `embed_session` 异常静默吞——搜索结果不全时，先 `index_existing_finals()` 重建一次再排查
 - BGE 模型 `BAAI/bge-small-zh-v1.5` 通过 `@st.cache_resource` 缓存，首次启动会下载（>200 MB）
 - 检索时给 query 加非对称前缀的逻辑在 `tab_search.py`，**不**在本模块
-- `VECTOR_DB_DIR` 在 `<repo>/vector_db`，**不**在 `data/` 下（与 v4.0.0 媒体目录迁移**不一致**，未来可考虑统一）
+- local 模式仍使用 `<repo>/vector_db`；cloud 模式使用 `data/users/{username}/vector_db`
 
 ## prompts.py
 
@@ -440,17 +447,24 @@
 
 > 文件落盘 + Markdown 导出。一律按文件类型路由到 `images/` / `videos/` / `text/` 子目录。
 
+### 路径规则
+
+- 所有 pending/final/vector 目录通过 `core.config` 动态解析
+- local 模式保持历史路径：`data/pending` / `data/final` / `<repo>/vector_db`
+- cloud 模式使用当前用户路径：`data/users/{username}/pending` / `data/users/{username}/final` / `data/users/{username}/vector_db`
+- 写入前由调用方创建目标目录；cloud 模式未设置当前用户时由 `config` 抛 `RuntimeError("Cloud 模式下未设置当前用户")`
+
 ### 公开 API
 
 #### `ensure_dirs() -> None`
-- **副作用**：创建 `data/{final,pending}/{images,videos,text}` + `vector_db/`
+- **副作用**：创建当前用户 pending/final 下的 `images/videos/text` 子目录 + 当前用户 vector_db 目录
 - **幂等**；启动入口 `app.py` 调用
 
 #### `save_session_pending(file_data_list, source_type, field_values, tags=None, domains=None, attributes=None, topics=None, emotion_tags=None, emotion_note='', summary='') -> None`
 - **入参**：
   - `file_data_list`：`list[tuple[bytes | file-like, original_name: str]]`
   - `source_type`：`'file'` / `'text'` / `'folder'`
-- **副作用**：写 `data/pending/{sub}/`；插 `sessions` 行（status=pending），透传结构化标签与摘要字段
+- **副作用**：写当前用户 pending `{sub}/`；插 `sessions` 行（status=pending），透传结构化标签与摘要字段
 - **不写 .md，不 embed**
 
 #### `save_session_final(file_data_list, source_type, field_values, tags=None, domains=None, attributes=None, topics=None, emotion_tags=None, emotion_note='', summary='') -> None`
@@ -470,7 +484,7 @@
 ### 半公开（被 `db_manager` 调用，不直接暴露给业务/UI）
 
 #### `_write_md(session: dict) -> None`
-- **用途**：生成/覆盖 `data/final/{session_id}.md`
+- **用途**：生成/覆盖当前用户 final 目录下的 `{session_id}.md`
 - **被谁调用**：`db_manager.update_session_fields / add_comment / delete_comment` / 本模块自身
 - **下划线含义**：业务代码与 UI 层禁止直接调，统一通过 `db_manager` 高层函数间接触发
 - **不变量**：仅 Final 记录有 .md；pending 不生成
