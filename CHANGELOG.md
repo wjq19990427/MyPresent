@@ -10,6 +10,18 @@
 
 ---
 
+## [v5.3.0] - 2026-05-15
+
+### 登录鉴权 + Windows 开发者同步工具链（Phase 6 深化）
+
+- **多用户登录体系**：全局认证库 `data/database.db` 仅保留 `users` 表；业务数据迁移至 `data/users/{username}/`；`core/db_manager` 新增 `init_global_db()` / `verify_user()` / `get_user_is_admin()`；`core/config` 新增 `get_global_db_path()`
+- **登录页**：`app.py` 将单密码门替换为用户名 + 密码表单；cloud 模式必须登录，local 模式直接放行；密码使用 PBKDF2-SHA256（20 万次迭代）存储
+- **admin 账户**：初始管理员 `plus7` 已写入，`is_admin=1`
+- **Windows 数据同步**：`scripts/pull_data.py`（Python + paramiko，无需额外工具）实现备份 → SFTP 下载 → SQLite integrity_check → 原子替换的安全拉取；`scripts/setup_sync_key.ps1` 生成专用只读 SSH 密钥并输出服务器 `authorized_keys` 配置行
+- **开发指南**：新增 `REMOTE_DEV.md`，覆盖 Windows 首次配置、日常流程、安全机制说明
+
+---
+
 ## [v5.2.0] - 2026-05-14
 
 ### 云部署基础设施（Phase 6 启动）

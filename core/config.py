@@ -41,6 +41,11 @@ def _user_root(username: str | None = None) -> Path:
     return constants.DATA_DIR / "users" / _resolve_user(username)
 
 
+def get_global_db_path() -> Path:
+    """全局认证库，始终指向 data/database.db，仅含 users 表。"""
+    return constants.DB_PATH
+
+
 def get_db_path(username: str | None = None) -> Path:
     if DEPLOY_MODE == "local":
         return constants.DB_PATH

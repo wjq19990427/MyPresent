@@ -4,7 +4,7 @@
 
 ## 当前版本
 
-`v5.2.0`（已发布）· 下一里程碑：Phase 6 深化
+`v5.3.0`（已发布）· 下一里程碑：Phase 6 深化续
 
 ## 核心架构
 
@@ -19,19 +19,17 @@
 
 ## 当前焦点
 
-- **v5.2.0 已发布** ✅（云部署基础设施 Phase 6 第一批）
-- Cloudflare Tunnel 已验证，`mypresent.cloud` 可访问
-- 下一阶段：Phase 6 深化（登录鉴权 / 数据分析 / LLM 深化）
+- **v5.3.0 已发布** ✅（登录鉴权 + Windows 同步工具链）
+- 下一阶段：Phase 6 深化续（数据分析 / LLM 深化 / 用户管理 UI）
 
 ## 最近完成
 
+- **v5.3.0**：多用户登录体系（users 表 + PBKDF2 密码）、admin 账户 plus7、Windows SFTP 数据同步工具链（pull_data.py + setup_sync_key.ps1）、REMOTE_DEV.md 开发指南
 - **v5.2.0**：config.py 部署配置层、db/vector_db/file_io 多用户路径隔离、EMBEDDING_ENABLED 开关、CI/CD 自动部署基础设施、.gitignore 安全加固
-- **task-45 merge**：规划台完成待办→时间表单+自动建事务；月历过滤已完成项
-- **v5.1.0**：情绪热力矩阵、洞察报告、规划台多项优化、密码门 + Cloudflare Tunnel 准备
 
 ## 待办 / TODO
 
-- [ ] Phase 6 深化：登录鉴权（cloud 模式）
+- [ ] Phase 6 深化：用户管理 UI（admin 新增 / 禁用用户）
 - [ ] Phase 6 深化：数据分析 + LLM 深化功能
 - [ ] 技术债：`_load_month_activities` 按天循环查询，可优化为单次月查询
 - [ ] 技术债：`tab_search` 跨层调用 `vector_db._get_*` 改为走公开接口

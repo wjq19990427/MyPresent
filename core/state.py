@@ -64,6 +64,7 @@ def init_state() -> None:
         "planning_record_moment_date": None,
         "_reflection_open":       {},
         "_postpone_open":         {},
+        "_current_user":          None,
     }.items():
         if k not in st.session_state:
             st.session_state[k] = v

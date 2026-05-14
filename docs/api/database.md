@@ -1,9 +1,31 @@
-# database.md — SQLite 主库
+# database.md — SQLite 数据库
 
-> `data/database.db` · WAL 模式 · `PRAGMA foreign_keys=ON`
-> Schema 单一信息源：`core/db_manager.py::_SCHEMA`
+## 两库架构（v5.3.0 起）
 
-## 表清单（实际 19 张）
+| 文件 | 模式 | 职责 | Schema 入口 |
+|------|------|------|------------|
+| `data/database.db` | 全局（两种模式均相同） | 认证：仅含 `users` 表 | `db_manager._GLOBAL_SCHEMA` |
+| `data/users/{username}/database.db` | cloud 模式 per-user | 业务数据（19 张表） | `db_manager._SCHEMA` |
+| `data/database.db` | local 模式 | 业务数据（19 张表，无 users 表） | `db_manager._SCHEMA` |
+
+> WAL 模式 · `PRAGMA foreign_keys=ON`
+
+---
+
+## 全局认证库：users 表
+
+| 字段 | 类型 | 约束 | 说明 |
+|------|------|------|------|
+| `id` | INTEGER | **PK**, AUTOINCREMENT | — |
+| `username` | TEXT | UNIQUE, NOT NULL | 登录用户名 |
+| `password_hash` | TEXT | NOT NULL | PBKDF2-SHA256（20 万次），hex 编码 |
+| `salt` | TEXT | NOT NULL | 16 字节随机 salt，hex 编码 |
+| `is_admin` | INTEGER | NOT NULL, default `0` | 1 = 管理员 |
+| `created_at` | TEXT | NOT NULL | `strftime('%Y-%m-%dT%H:%M:%S', 'now')` |
+
+---
+
+## 业务库表清单（19 张）
 
 | # | 表 | 主键 | 职责 | 契约状态 |
 |---|----|------|------|----------|

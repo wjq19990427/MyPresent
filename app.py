@@ -4,7 +4,7 @@ from __future__ import annotations
 import streamlit as st
 
 from core.constants import EMBEDDING_ENABLED
-from core.db_manager import init_db
+from core.db_manager import init_db, init_global_db, verify_user
 from core.file_io import ensure_dirs
 from core.state import init_state
 from core.vector_db import _ensure_indexed
@@ -46,27 +46,29 @@ _HOME_TARGETS = {
 
 
 def _check_auth() -> None:
-    """密码门：secrets.toml 中配置 app_password 时启用，否则跳过（本地开发模式）。"""
-    try:
-        required = st.secrets["app_password"]
-    except (KeyError, FileNotFoundError, Exception):
-        return  # 未配置密码 → 本地开发模式，直接放行
-
-    if not required:
+    """Cloud 模式：用户名 + 密码认证；local 模式直接放行。"""
+    from core import config as _cfg
+    if _cfg.DEPLOY_MODE == "local":
         return
 
-    if st.session_state.get("_authenticated"):
+    logged_in: str | None = st.session_state.get("_current_user")
+    if logged_in:
+        _cfg.set_current_user(logged_in)
         return
 
     _, col, _ = st.columns([1, 1.4, 1])
     with col:
         st.markdown("## 🔐 MyPresent")
-        st.markdown("请输入访问密码以继续")
-        pwd = st.text_input("密码", type="password", key="_auth_input", label_visibility="collapsed")
-        if st.button("进入", type="primary", use_container_width=True):
-            if pwd == required:
-                st.session_state["_authenticated"] = True
+        username = st.text_input("用户名", key="_login_username")
+        password = st.text_input("密码", type="password", key="_login_password")
+        if st.button("登录", type="primary", use_container_width=True):
+            result = verify_user(username.strip(), password)
+            if result is True:
+                st.session_state["_current_user"] = username.strip()
+                _cfg.set_current_user(username.strip())
                 st.rerun()
+            elif result is None:
+                st.error("用户不存在")
             else:
                 st.error("密码错误")
     st.stop()
@@ -74,6 +76,7 @@ def _check_auth() -> None:
 
 def main() -> None:
     st.set_page_config(page_title="MyPresent", page_icon="🪞", layout="wide")
+    init_global_db()
     _check_auth()
     init_db()
     ensure_dirs()

@@ -5,7 +5,9 @@
 """
 from __future__ import annotations
 
+import binascii
 import calendar as cal_lib
+import hashlib
 import json
 import sqlite3
 from contextlib import contextmanager
@@ -195,6 +197,52 @@ CREATE TABLE IF NOT EXISTS session_linked_goals (
     UNIQUE(session_id, goal_id)
 );
 """
+
+
+_GLOBAL_SCHEMA = """
+PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT    UNIQUE NOT NULL,
+    password_hash TEXT    NOT NULL,
+    salt          TEXT    NOT NULL,
+    is_admin      INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%S', 'now'))
+);
+"""
+
+
+def _hash_password(password: str, salt: str) -> str:
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200000)
+    return binascii.hexlify(h).decode()
+
+
+def init_global_db() -> None:
+    db_path = config.get_global_db_path()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(_GLOBAL_SCHEMA)
+
+
+def verify_user(username: str, password: str) -> bool | None:
+    """None = 用户不存在，False = 密码错误，True = 认证通过。"""
+    db_path = config.get_global_db_path()
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT password_hash, salt FROM users WHERE username = ?", (username,)
+        ).fetchone()
+    if row is None:
+        return None
+    return _hash_password(password, row[1]) == row[0]
+
+
+def get_user_is_admin(username: str) -> bool:
+    db_path = config.get_global_db_path()
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT is_admin FROM users WHERE username = ?", (username,)
+        ).fetchone()
+    return bool(row and row[0])
 
 
 def init_db() -> None:

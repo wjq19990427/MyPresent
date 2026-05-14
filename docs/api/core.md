@@ -30,7 +30,25 @@
 > SQLite 主库的唯一访问层。Schema 详见 [`database.md`](database.md)。
 > 上层禁止直接 `sqlite3.connect`——一律通过此模块。
 
-### 初始化
+### 全局认证库（users 表）
+
+> 以下三个函数操作 `data/database.db`（全局库），与业务数据库完全隔离。
+
+#### `init_global_db() -> None`
+- **用途**：在全局库中创建 `users` 表（如不存在）；启动时在 `_check_auth()` 前调用
+- **副作用**：写 `config.get_global_db_path()`；幂等
+- **users 表结构**：`id / username(UNIQUE) / password_hash / salt / is_admin / created_at`
+
+#### `verify_user(username: str, password: str) -> bool | None`
+- **返回**：`True` = 认证通过；`False` = 密码错误；`None` = 用户不存在
+- **副作用**：无（只读全局库）
+- **密码算法**：PBKDF2-SHA256，20 万次迭代；salt 独立存储
+
+#### `get_user_is_admin(username: str) -> bool`
+- **返回**：该用户是否为管理员；用户不存在时返回 `False`
+- **副作用**：无
+
+### 业务库初始化
 
 #### `init_db() -> None`
 - **用途**：创建库 + 全部表（如不存在）+ 灌入 `DEFAULT_TAGS` / `label_registry` 系统种子
@@ -548,6 +566,10 @@
 - `_vector_db_ready`：由 `vector_db._ensure_indexed()` 首次写入
 - 任何由 `setdefault` 散落到组件内的 key 都属于**应在此登记但未登记**的债务
 
+### 认证相关键
+
+- `_current_user`：已登录用户名（`str | None`）；cloud 模式由 `_check_auth()` 在 `init_state()` 前写入；`init_state()` 以 `None` 兜底注册（不覆盖已有值）
+
 ### 命名约定
 
 - `_xxx`（下划线开头）= 内部状态，不在 UI 直接展示
@@ -584,7 +606,7 @@
 | `DATA_DIR` | `Path("data")` |
 | `FINAL_DIR` | `data/final` |
 | `PENDING_DIR` | `data/pending` |
-| `DB_PATH` | `data/database.db` |
+| `DB_PATH` | `data/database.db`（cloud 模式下为全局认证库，仅含 `users` 表；local 模式下为全量业务库） |
 | `VECTOR_DB_DIR` | `<repo>/vector_db`（**不**在 `data/` 下） |
 
 ### 文件格式集合
@@ -667,6 +689,11 @@
 - **cloud 模式**：返回当前 `ContextVar` 中的用户名；未设置时返回 `None`
 
 ### 路径解析
+
+#### `get_global_db_path() -> Path`
+- **用途**：全局认证库的唯一路径入口，始终返回 `constants.DB_PATH`（即 `data/database.db`）
+- **约束**：两种模式下均相同；仅含 `users` 表，不含任何业务数据
+- **副作用**：仅返回 `Path`，不创建目录
 
 #### `get_db_path(username: str | None = None) -> Path`
 #### `get_vector_db_dir(username: str | None = None) -> Path`
