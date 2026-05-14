@@ -1,0 +1,30 @@
+name: Deploy MyPresent
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: SSH deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          # GitHub Secrets 配置说明：
+          # SSH_HOST：服务器公网域名或 IP，例如 app.example.com
+          # SSH_USER：服务器登录用户，例如 ubuntu
+          # SSH_PRIVATE_KEY：该用户的 SSH 私钥；对应公钥需提前加入服务器 ~/.ssh/authorized_keys
+          # SSH_PORT：SSH 端口，默认通常为 22
+          # APP_DIR：服务器上的 MyPresent 项目目录，例如 /opt/mypresent
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script_stop: true
+          script: |
+            set -e
+            cd "${{ secrets.APP_DIR }}"
+            bash deploy.sh
