@@ -10,6 +10,20 @@
 
 ---
 
+## [v5.2.0] - 2026-05-14
+
+### 云部署基础设施（Phase 6 启动）
+
+- **`core/config.py`**：新建部署配置入口，读取 `DEPLOY_MODE`（local / cloud）；提供基于 `ContextVar` 的线程隔离用户上下文（`set_current_user` / `get_current_user`）及四条动态路径函数（`get_db_path` / `get_vector_db_dir` / `get_pending_dir` / `get_final_dir`）
+- **数据库多用户隔离**：`db_manager._conn()` 与 `init_db()` 改为通过 `config` 动态解析路径；cloud 模式下每位用户拥有独立 SQLite 文件（`data/users/{username}/database.db`），首次写入自动创建目录
+- **向量库与媒体目录隔离**：`vector_db._get_collection()` 拆为两层，底层 `_get_collection_for_user(username)` 以 username 为 `@st.cache_resource` cache key，不同用户向量库物理隔离；`file_io` 所有路径调用统一通过 `config` 解析
+- **Embedding 功能开关**：新增 `EMBEDDING_ENABLED` 环境变量（缺省 true）；设为 false 时向量模型与 ChromaDB 完全不加载，搜索页降级展示提示，`app.py` 启动不触发索引
+- **OOM 防御**：cloud 模式下若启用本地 Embedding 模型，启动时展示醒目警告
+- **CI/CD 自动部署**：新增 `deploy.sh`（备份 → 拉代码 → 更新依赖 → 重启服务，含 7 天备份清理）；`.github/workflows/deploy.yml` 在 push main 时通过 SSH 触发；`infra/` 提供 systemd 服务单元模板与含 WebSocket 支持的 Nginx 配置模板
+- **安全加固**：`.gitignore` 补全 `Assets/` `backups/` `.env` `*.db` 等条目，防止用户数据进入 Git 历史
+
+---
+
 ## [v5.1.0] - 2026-05-12
 
 ### 远程访问支持

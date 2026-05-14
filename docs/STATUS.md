@@ -4,32 +4,35 @@
 
 ## 当前版本
 
-`v5.1.0`（已发布）· 下一里程碑：Phase 6
+`v5.2.0`（已发布）· 下一里程碑：Phase 6 深化
 
 ## 核心架构
 
 - **三层结构**：`core/`（基础设施）· `skills/`（LLM 插件槽）· `components/`（UI 层）
-- **主库**：SQLite `data/database.db`，18 张规范化表，WAL 模式，外键级联
-- **向量库**：ChromaDB + `BAAI/bge-small-zh-v1.5`，本地持久化
+- **主库**：SQLite，local 模式 `data/database.db`，cloud 模式 `data/users/{username}/database.db`
+- **向量库**：ChromaDB + `BAAI/bge-small-zh-v1.5`，per-user 隔离；`EMBEDDING_ENABLED=false` 可完全跳过加载
+- **部署配置层**：`core/config.py`，双态（local / cloud），ContextVar 用户隔离，统一路径解析
 - **LLM 调用层**：`core/llm_client.py` 统一入口，自动 JSON 重试 + `llm_logs` 写库
 - **Skills 插件体系**：`BaseSkill(ABC)` + `SkillResult`，已落地 `TaggingSkill` / `AnalysisSkill`
 - **标签体系**：L-A-T 三维（领域 / 视角 / 话题）+ 情绪，`label_registry` 统一管理
-- **媒体目录**：`data/pending|final/`；导航协议：`_nav_target` session_state 驱动跨 Tab 跳转
+- **CI/CD**：`deploy.sh` + GitHub Actions SSH 自动部署；`infra/` 提供 Nginx + systemd 模板
 
 ## 当前焦点
 
-- **v5.1.0 已发布** ✅（洞见模块 + 规划台优化 + 远程访问支持）
-- Cloudflare Tunnel 配置中（待用户完成 DNS 切换）
-- 下一阶段：Phase 6（数据分析 + LLM 深化）
+- **v5.2.0 已发布** ✅（云部署基础设施 Phase 6 第一批）
+- Cloudflare Tunnel 已验证，`mypresent.cloud` 可访问
+- 下一阶段：Phase 6 深化（登录鉴权 / 数据分析 / LLM 深化）
 
 ## 最近完成
 
+- **v5.2.0**：config.py 部署配置层、db/vector_db/file_io 多用户路径隔离、EMBEDDING_ENABLED 开关、CI/CD 自动部署基础设施、.gitignore 安全加固
+- **task-45 merge**：规划台完成待办→时间表单+自动建事务；月历过滤已完成项
 - **v5.1.0**：情绪热力矩阵、洞察报告、规划台多项优化、密码门 + Cloudflare Tunnel 准备
-- **task-38~39.5 merge**：规划台优化、标签体系改进、时长统计
-- **task-40~44 merge**：洞见 Tab、EmotionScoringSkill、热力矩阵、InsightReportSkill、报告 UI、待办预填
 
 ## 待办 / TODO
 
+- [ ] Phase 6 深化：登录鉴权（cloud 模式）
+- [ ] Phase 6 深化：数据分析 + LLM 深化功能
 - [ ] 技术债：`_load_month_activities` 按天循环查询，可优化为单次月查询
 - [ ] 技术债：`tab_search` 跨层调用 `vector_db._get_*` 改为走公开接口
 - [ ] 技术债：`_render_batch_row` 在批量模式中每行调用 `get_groups()`，可提取到外层
