@@ -1,0 +1,24 @@
+# MyPresent systemd 服务模板。
+# 使用方法：
+# 1. 将 {YOUR_USER} 替换为运行服务的 Linux 用户，例如 ubuntu。
+# 2. 将 {APP_DIR} 替换为服务器项目目录，例如 /opt/mypresent。
+# 3. 将 {PYTHON_PATH} 替换为 Python 可执行文件路径，例如 /opt/mypresent/.venv/bin/python。
+# 4. 复制到 /etc/systemd/system/mypresent.service 后执行：
+#    sudo systemctl daemon-reload
+#    sudo systemctl enable --now mypresent
+
+[Unit]
+Description=MyPresent Streamlit App
+After=network.target
+
+[Service]
+Type=simple
+User={YOUR_USER}
+WorkingDirectory={APP_DIR}
+EnvironmentFile={APP_DIR}/.env
+ExecStart={PYTHON_PATH} -m streamlit run app.py --server.port=8501 --server.address=127.0.0.1
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

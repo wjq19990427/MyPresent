@@ -1,0 +1,26 @@
+# MyPresent Nginx 配置模板。
+# 使用方法：
+# 1. 将 {YOUR_DOMAIN} 替换为你的域名，例如 mypresent.example.com。
+# 2. 保存到 /etc/nginx/sites-available/mypresent，并软链到 sites-enabled。
+# 3. 执行 sudo nginx -t && sudo systemctl reload nginx。
+# 4. HTTPS 可用 certbot 扩展：
+#    sudo certbot --nginx -d {YOUR_DOMAIN}
+
+server {
+    listen 80;
+    server_name {YOUR_DOMAIN};
+
+    location / {
+        proxy_pass http://127.0.0.1:8501;
+        proxy_http_version 1.1;
+
+        # WebSocket 支持（Streamlit 必需，缺少此配置页面将无限加载）
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_read_timeout 86400;
+    }
+}
