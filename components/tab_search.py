@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core.constants import COLS
+from core.constants import COLS, EMBEDDING_ENABLED
 from core.db_manager import load_db, get_llm_models
 from core.llm_client import call
 from core.vector_db import _get_collection, _get_embedder
@@ -59,6 +59,14 @@ def _render_date_filter() -> None:
             st.warning("请选择开始和结束日期")
         elif start > end:
             st.error("开始日期不能晚于结束日期")
+        elif not EMBEDDING_ENABLED:
+            exact, fuzzy_ids = _date_filter_without_embedding(start, end)
+            st.session_state["date_filter_exact"] = exact
+            st.session_state["date_filter_fuzzy"] = fuzzy_ids
+            st.session_state["date_filter_range"] = (
+                start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+            )
+            st.session_state["search_selected"] = None
         else:
             start_num = int(start.strftime("%Y%m%d"))
             end_num   = int(end.strftime("%Y%m%d"))
@@ -153,6 +161,10 @@ def _render_date_filter() -> None:
 # ─── 语义检索 ─────────────────────────────────────────────────────────────────
 
 def _render_semantic_search() -> None:
+    if not EMBEDDING_ENABLED:
+        st.info("向量搜索功能当前未启用（EMBEDDING_ENABLED=false）。")
+        return
+
     query = st.text_input(
         "描述你想找的内容",
         placeholder="例如：和朋友一起看日落的那次旅行……",
@@ -216,6 +228,10 @@ def _render_semantic_search() -> None:
 # ─── 智能问答 ─────────────────────────────────────────────────────────────────────────────
 
 def _render_qa() -> None:
+    if not EMBEDDING_ENABLED:
+        st.info("向量搜索功能当前未启用（EMBEDDING_ENABLED=false）。")
+        return
+
     models = get_llm_models()
     if not models:
         st.info("请先前往「📈 运行看板」 Tab 添加 Provider 和模型。")
@@ -283,3 +299,30 @@ def render_search_tab() -> None:
         _render_semantic_search()
     else:
         _render_qa()
+
+
+def _date_filter_without_embedding(start, end) -> tuple[list[tuple[str, dict]], list[str]]:
+    exact: list[tuple[str, dict]] = []
+    fuzzy_ids: list[str] = []
+    for session in load_db():
+        if session.get("status") != "final":
+            continue
+        iso, num = _parse_date_for_filter(session.get("content_time", ""))
+        if not iso:
+            fuzzy_ids.append(session["session_id"])
+        elif int(start.strftime("%Y%m%d")) <= num <= int(end.strftime("%Y%m%d")):
+            exact.append((session["session_id"], {"content_time_num": num}))
+    return exact, fuzzy_ids
+
+
+def _parse_date_for_filter(raw: str) -> tuple[str, int]:
+    from datetime import datetime
+
+    text = str(raw or "").strip()
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y-%m", "%Y/%m", "%Y"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.strftime("%Y-%m-%d"), int(dt.strftime("%Y%m%d"))
+        except ValueError:
+            continue
+    return "", 0

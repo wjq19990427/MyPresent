@@ -4,6 +4,7 @@
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # ─── 路径 ──────────────────────────────────────────────────────────────────────
@@ -12,6 +13,14 @@ FINAL_DIR     = DATA_DIR / "final"
 PENDING_DIR   = DATA_DIR / "pending"
 DB_PATH       = DATA_DIR / "database.db"
 VECTOR_DB_DIR = Path(__file__).parent.parent / "vector_db"
+
+# ─── Embedding ────────────────────────────────────────────────────────────────
+EMBEDDING_ENABLED: bool = os.getenv("EMBEDDING_ENABLED", "true").strip().lower() not in {
+    "0",
+    "false",
+    "no",
+    "off",
+}
 
 # ─── 文件格式 ──────────────────────────────────────────────────────────────────
 TEXT_EXTS  = {".txt", ".md"}
