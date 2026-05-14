@@ -27,3 +27,16 @@ Thumbs.db
 
 # SOP 模板（独立仓库 AI-Co-Pilot-Starter）
 template/
+
+# 用户数据与媒体文件 - 绝不提交
+Assets/
+backups/
+
+# 环境配置 - 绝不提交
+.env
+.env.local
+
+# 数据库文件安全兜底
+*.db
+*.db-shm
+*.db-wal

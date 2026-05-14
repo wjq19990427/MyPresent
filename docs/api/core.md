@@ -18,6 +18,7 @@
 | `file_io.py` | 文件写入 / 移动 / Markdown 导出 | ✅ |
 | `media.py` | 视频缩略图 / 图像格式转换 | ✅ |
 | `state.py` | Streamlit `session_state` 初始化 | ✅ |
+| `config.py` | 部署模式配置 + 用户上下文路径解析 | ✅ |
 | `constants.py` | `FIELD_SCHEMA` + 全部常量 | ✅ |
 
 > ⬜ 未填 · 🟡 部分 · ✅ 完整。模板见 [`_TEMPLATE.md`](_TEMPLATE.md)
@@ -608,3 +609,38 @@
 5. 在 `init_db()` 的幂等迁移里补 `ALTER TABLE sessions ADD COLUMN ...`，必要时回填历史数据 ⚠️
 
 > 这是当前架构遗留的最大紧耦合点，值得在未来重构里优先打破（候选方案：`sessions` 改为 K/V `session_fields` 表，业务字段全部走 EAV）。
+
+## config.py
+
+> 部署配置入口。读取 `.env` / 环境变量中的 `DEPLOY_MODE`，并提供 local / cloud 双态路径解析与当前用户上下文。
+
+### 部署模式
+
+#### `DEPLOY_MODE: str`
+- **来源**：模块加载时调用一次 `load_dotenv()`，再读取环境变量 `DEPLOY_MODE`
+- **取值**：`"local"` / `"cloud"`；缺省为 `"local"`
+- **异常**：非法值在模块加载时抛 `ValueError("DEPLOY_MODE 必须为 local 或 cloud")`
+- **约束**：本模块不 import Streamlit，不创建任何目录
+
+### 用户上下文
+
+#### `set_current_user(username: str | None) -> None`
+- **local 模式**：静默 no-op
+- **cloud 模式**：写入 `ContextVar`，线程 / 会话天然隔离
+
+#### `get_current_user() -> str | None`
+- **local 模式**：始终返回 `None`
+- **cloud 模式**：返回当前 `ContextVar` 中的用户名；未设置时返回 `None`
+
+### 路径解析
+
+#### `get_db_path(username: str | None = None) -> Path`
+#### `get_vector_db_dir(username: str | None = None) -> Path`
+#### `get_pending_dir(username: str | None = None) -> Path`
+#### `get_final_dir(username: str | None = None) -> Path`
+
+- **local 模式**：分别返回 `constants.DB_PATH / VECTOR_DB_DIR / PENDING_DIR / FINAL_DIR`
+- **cloud 模式**：返回 `data/users/{username}/database.db`、`data/users/{username}/vector_db`、`data/users/{username}/pending`、`data/users/{username}/final`
+- **username 规则**：参数为 `None` 时内部调用 `get_current_user()`
+- **异常**：cloud 模式下未设置用户名时抛 `RuntimeError("Cloud 模式下未设置当前用户")`
+- **副作用**：仅返回 `Path`，不创建目录；目录创建由写入方负责
