@@ -1140,24 +1140,21 @@ def _render_reflection_box(todo_id: str) -> None:
 
 def _render_completion_activity_box(todo_id: str, selected_date: str) -> None:
     with st.container(border=True):
-        st.caption("🎉 完成了！选择开始时间并记录一下心得吧（选填）")
-        time_options = [""] + [f"{i:02d}" for i in range(24)]
-        minute_options = [""] + [f"{i:02d}" for i in range(60)]
+        st.caption("🎉 完成了！选择时间并记录一下心得吧（选填）")
         time_cols = st.columns(2)
         with time_cols[0]:
-            hour = st.selectbox(
-                "小时",
-                time_options,
-                format_func=lambda value: value or "未选",
-                key=f"_compl_hour_{todo_id}",
+            start_time = _render_completion_time_select(
+                "开始时间", f"_compl_start_{todo_id}"
             )
         with time_cols[1]:
-            minute = st.selectbox(
-                "分钟",
-                minute_options,
-                format_func=lambda value: value or "未选",
-                key=f"_compl_min_{todo_id}",
+            end_time = _render_completion_time_select(
+                "终止时间", f"_compl_end_{todo_id}"
             )
+
+        computed_duration = _duration_between(start_time, end_time)
+        if computed_duration is not None:
+            st.caption(f"自动计算时长：{format_duration(computed_duration)}")
+
         reflection = st.text_area(
             "完成心得",
             key=f"ref_{todo_id}",
@@ -1166,29 +1163,65 @@ def _render_completion_activity_box(todo_id: str, selected_date: str) -> None:
         ca, cb = st.columns(2)
         with ca:
             if st.button("✅ 确认完成", key=f"ref_ok_{todo_id}", type="primary"):
+                if end_time and not start_time:
+                    st.warning("请先选择起始时间")
+                    return
+                if start_time and end_time and computed_duration is None:
+                    st.warning("终止时间不能早于起始时间")
+                    return
                 _complete_todo_with_activity_time(
-                    todo_id, selected_date, reflection, hour, minute
+                    todo_id,
+                    selected_date,
+                    reflection,
+                    start_time,
+                    end_time,
+                    computed_duration,
                 )
         with cb:
             if st.button("跳过", key=f"ref_skip_{todo_id}"):
                 _complete_todo_only(todo_id, "")
 
 
+def _render_completion_time_select(label: str, key: str) -> str:
+    time_options = [""] + [f"{i:02d}" for i in range(24)]
+    minute_options = [""] + [f"{i:02d}" for i in range(60)]
+    st.markdown(f"**{label}**")
+    hour_col, minute_col = st.columns(2)
+    with hour_col:
+        hour = st.selectbox(
+            "小时",
+            time_options,
+            format_func=lambda value: value or "未选",
+            key=f"{key}_hour",
+        )
+    with minute_col:
+        minute = st.selectbox(
+            "分钟",
+            minute_options,
+            format_func=lambda value: value or "未选",
+            key=f"{key}_minute",
+        )
+    return f"{hour}:{minute}" if hour and minute else ""
+
+
 def _complete_todo_with_activity_time(
     todo_id: str,
     selected_date: str,
     reflection: str,
-    hour: str,
-    minute: str,
+    start_time: str,
+    end_time: str,
+    duration: int | None,
 ) -> None:
     todo = _find_todo_in_render_state(todo_id)
     complete_todo(todo_id, reflection)
-    if todo and hour and minute:
+    if todo and start_time:
         create_daily_activity(
             selected_date,
             str(todo.get("content") or "").strip(),
             str(todo.get("category") or "").strip(),
-            start_time=f"{hour}:{minute}",
+            duration=int(duration or 0),
+            start_time=start_time,
+            end_time=end_time or None,
         )
         st.session_state["planning_record_moment_date"] = selected_date
     _close_reflection(todo_id)
@@ -1254,8 +1287,9 @@ def _close_reflection(todo_id: str) -> None:
 
 
 def _reset_completion_time(todo_id: str) -> None:
-    st.session_state.pop(f"_compl_hour_{todo_id}", None)
-    st.session_state.pop(f"_compl_min_{todo_id}", None)
+    for suffix in ("start", "end"):
+        st.session_state.pop(f"_compl_{suffix}_{todo_id}_hour", None)
+        st.session_state.pop(f"_compl_{suffix}_{todo_id}_minute", None)
 
 
 def _render_postpone_box(todo_id: str) -> None:
