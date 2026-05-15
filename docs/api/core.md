@@ -50,12 +50,22 @@
 - **副作用**：无（只读全局库）
 - **密码算法**：PBKDF2-SHA256，20 万次迭代；salt 独立存储
 
+#### `update_user_password(username: str, old_password: str, new_password: str) -> None`
+- **用途**：修改全局库 `users` 表中指定用户的密码；调用方只应传当前登录用户
+- **行为**：先用 `verify_user()` 校验原密码；通过后重新生成 salt，并用 PBKDF2-SHA256 20 万次迭代散列新密码
+- **副作用**：写 `config.get_global_db_path()`；仅更新 `users.password_hash/salt`
+- **异常**：原密码错误或用户不存在时抛 `ValueError("原密码错误")`；新密码去空白后为空时抛 `ValueError("新密码不能为空")`
+
 #### `get_user_is_admin(username: str) -> bool`
 - **返回**：该用户是否为管理员；用户不存在时返回 `False`
 - **副作用**：无
 
 #### `list_usernames() -> list[str]`
 - **返回**：所有已注册用户名，按字母升序排列；仅包含 `username` 字段
+- **副作用**：无（只读全局库）
+
+#### `list_users() -> list[dict]`
+- **返回**：所有已注册用户，按用户名升序排列；每条包含 `username/is_admin`
 - **副作用**：无（只读全局库）
 
 ### 业务库初始化
