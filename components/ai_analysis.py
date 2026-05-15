@@ -75,7 +75,7 @@ def render_session_ai_analysis(
     *,
     state_key: str,
 ) -> dict | None:
-    """渲染已存在记录的 AI 分析面板，确认后返回选中的字段值。"""
+    """保留给未来复用；详情页当前不再调用整体 AI 分析面板。"""
     return _render_analysis_panel(
         source_type=_SESSION_SOURCE,
         source=session,
