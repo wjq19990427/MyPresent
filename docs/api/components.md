@@ -389,7 +389,7 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 #### `_render_calendar_todos() -> None`
 - **功能**：月份导航、周一到周日的方格月历、日期选择、日期内待办摘要、事务数量提示、本月事务时长统计、选中日期的待办事宜与今日事务、整月待办列表、新增待办入口
 - **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `planning_activity_prefill`
-- **过期迁移**：当当前渲染月份与上次迁移月份不同时，调用 `migrate_overdue_todos(year, month)`；迁移数大于 0 时在顶部显示一次性提示
+- **过期迁移**：每次渲染按真实系统日期取当前年月调用 `migrate_overdue_todos(current_year, current_month)`；防重复 session key 使用真实当月，用户浏览其他月份不触发迁移到视图月份；迁移数大于 0 时在顶部显示一次性提示
 - **视觉约定**：星期标题与日期格共用同一列规格；日期格使用 HTML 信息块展示日期数字、最多 3 条待办摘要和今日事务数量提示；待办摘要前置小号彩色边框优先级标签；待办与事务之间用分隔线区分，超出显示 `+N 更多`；今日和选中日期有不同高亮
 - **交互约定**：选中具体日期后新增待办默认填入该日期；日期视图提供返回月份视图入口，清空 `planning_cal_date`
 - **过滤约定**：月历格与月份模式的整月待办列表只展示未完成待办；选中具体日期后的待办列表仍展示全部待办
