@@ -72,11 +72,12 @@
   - 归档（仅 pending）→ `move_to_final(sid)`
   - 删除按钮 → `soft_delete_session(sid)`，清空选中态并关闭详情面板
   - 纯文字 session 直接重写源 .txt 文件
-  - AI 内容生成只写入当前详情页建议缓存；字段建议逐条采纳后才写入对应 widget；保存/归档时清空建议缓存
-  - AI 标签建议只写入话题多选框与新标签缓存；保存/归档前才将用户实际选中的新标签通过 `add_label` 入库
+  - AI 内容解析只写入当前详情页建议缓存；字段建议逐条采纳后才写入对应 widget；保存/归档时清空建议缓存
+  - AI 标签建议写入四维标签多选框与新标签缓存；保存/归档前才将用户实际选中的新标签通过 `add_label` 入库
 - **依赖组件**：`forms.render_field_inputs` / `ai_tagging.render_ai_tag_picker` / `_render_comments`
 - **已知陷阱**：widget key 用 `safe_sid = "".join(c if c.isalnum() else "_" for c in sid)` 净化，避免 streamlit 对特殊字符报错
-- **AI 功能位置**：详情页字段编辑区上方提供「✨ AI 生成内容」，仅生成 `title/summary/feeling/reason/emotion_note` 的内联建议；「🤖 AI 建议标签」只填入话题多选框；详情页不再渲染旧的整体 AI 分析面板，也不再提供 StorySkill 摘要入口
+- **布局**：详情页按文本内容（仅纯文本记录）→ 分类标签 → 内容元数据三段渲染，段间用 `st.divider()` 分隔；非纯文本记录从分类标签段开始
+- **AI 功能位置**：分类标签段顶部提供「🤖 AI 建议标签」，可填入 `domains/attributes/topics/emotion_tags` 四维多选框；内容元数据段顶部提供「✨ AI 内容解析」，仅生成 `title/summary/feeling/reason/emotion_note` 的内联建议；详情页不再渲染旧的整体 AI 分析面板，也不再提供 StorySkill 摘要入口
 - **保存控件**：详情页使用普通 `st.button` 即时按钮，不再用 `st.form`，避免 AI 组件写入 widget state 后前端不刷新
 
 ### `_render_comments(session) -> None`
@@ -447,32 +448,32 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 > 「让 AI 帮我选标签」交互组件。基于 `tagging_skill.auto_tag_session`。
 
-### `render_ai_tag_picker(session_data, model_id, state_key, apply_key="", new_tags_key="") -> None`
+### `render_ai_tag_picker(session_data, model_id, state_key, apply_keys=None, new_tags_key="") -> None`
 - **必须**在 `st.form` 外调用（依赖 `st.button` 即时回写）
 - **入参**：
   - `session_data: dict`：含 `description` / `feeling`（至少一项有值）
   - `model_id: str`：当前选中模型；空字符串时显示提示并 return
   - `state_key: str`：本组件独占的 session_state 命名空间（保证唯一）
-  - `apply_key: str`：目标标签/话题 multiselect 的 widget key；点击按钮后直接合并写入该 key
-  - `new_tags_key: str`：未入库新标签的 session_state key；调用方保存时负责写入正式标签库
+  - `apply_keys: dict[str, str]`：四维目标 multiselect 的 widget key 映射，如 `{domains, attributes, topics, emotion_tags}`
+  - `new_tags_key: str`：未入库新标签的 session_state key；值为 `{field: list[str]}` dict，调用方保存时负责写入正式标签库
 - **副作用**：
   - 点击「🤖 AI 建议标签」后调用 `auto_tag_session`
-  - 将 `suggested_tags + new_tags` 去重合并写入 `st.session_state[apply_key]`
-  - 将 `new_tags` 合并写入 `st.session_state[new_tags_key]`，不写 DB
+  - 将 `suggested[field] + new_labels[field]` 去重合并写入 `st.session_state[apply_keys[field]]`
+  - 将 `new_labels` 按维度合并写入 `st.session_state[new_tags_key]`，不写 DB
   - 触发 `st.toast("AI 建议标签已更新，确认后保存生效")` 后 `st.rerun()`
 
 ### session_state 键空间约定
 
 | 模板 | 含义 |
 |------|------|
-| `_ai_tag_result_{state_key}` | LLM 返回的三字段 dict，用于保留 reasoning |
-| `{new_tags_key}` | AI 新生成且尚未入库的标签列表 |
+| `_ai_tag_result_{state_key}` | LLM 返回的 `{suggested, new_labels, reasoning}` dict，用于保留 reasoning |
+| `{new_tags_key}` | AI 新生成且尚未入库的四维标签 dict |
 
 ### 已知陷阱
 
-- 与 `cards._render_detail` 是**紧耦合**：当前详情页传入 `apply_key=f"{safe_sid}_topics"`，AI 标签直接填入「话题」多选框
-- 组件不再调用 `add_tag`；新标签保存前只存在于 session_state，详情页保存/归档时通过结构化标签持久化逻辑写入 `label_registry(type="topic")`
-- Streamlit multiselect 不能给单个选项染色；AI 新标签由 `cards.py` 在话题多选框下方以橙色提示块展示
+- 与 `cards._render_detail` 是**紧耦合**：当前详情页传入四维 `apply_keys`，AI 标签直接填入结构化标签多选框
+- 组件不再调用 `add_tag`；新标签保存前只存在于 session_state，详情页保存/归档时通过结构化标签持久化逻辑写入对应 `label_registry`
+- Streamlit multiselect 不能给单个选项染色；AI 新标签由 `cards.py` 在对应维度多选框下方以橙色提示块展示
 
 ## ai_fill.py
 
