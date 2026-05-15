@@ -1413,7 +1413,7 @@ def _render_reflection_box(todo_id: str) -> None:
         selected_date = selected_date or str((todo or {}).get("target_date") or "")
         if selected_date:
             _render_completion_activity_box(todo_id, selected_date)
-            return
+        return
     if selected_date:
         _render_completion_activity_box(todo_id, selected_date)
         return
