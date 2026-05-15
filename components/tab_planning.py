@@ -15,7 +15,6 @@ from core.db_manager import (
     TODO_CATEGORIES,
     TODO_PRIORITIES,
     TODO_RECURRENCES,
-    complete_todo,
     create_annual_goal,
     create_calendar_todo,
     delete_annual_goal,
@@ -27,7 +26,9 @@ from core.db_manager import (
     get_daily_activities,
     get_goal_categories,
     get_monthly_activity_stats,
+    get_todo_subtree_ids,
     get_todos_by_goal,
+    mark_todo_subtree_moved,
     migrate_overdue_todos,
     postpone_todo,
     add_goal_category,
@@ -36,6 +37,7 @@ from core.db_manager import (
     update_annual_goal,
     update_daily_activity,
     update_calendar_todo,
+    update_todo_subtree_state,
 )
 from core.llm_client import call_llm
 from core.prompts import (
@@ -305,10 +307,13 @@ def _render_calendar_todos() -> None:
     if migrated_count > 0:
         st.info(f"已自动迁移 {migrated_count} 条过期待办至本月")
 
+    all_todos = get_calendar_todos()
+    _sync_tree_parent_completion(all_todos)
     todos = get_calendar_todos(year=year, month=month)
+    all_todos = get_calendar_todos()
     day_map: dict[str, list[dict]] = defaultdict(list)
     for todo in todos:
-        if todo["status"] == "已完成":
+        if todo["status"] == "已完成" or todo.get("parent_id"):
             continue
         day_map[todo["target_date"]].append(todo)
     activity_map = _load_month_activities(year, month)
@@ -335,11 +340,18 @@ def _render_calendar_todos() -> None:
     selected_date = st.session_state.get("planning_cal_date")
     if selected_date:
         st.markdown(f"#### 📌 {selected_date} 的日历 & 日志")
-        display_todos = [t for t in todos if t["target_date"] == selected_date]
+        display_todos = [
+            t for t in todos if t["target_date"] == selected_date and not t.get("parent_id")
+        ]
         display_activities = activity_map.get(selected_date, [])
     else:
         st.markdown(f"#### 📋 {year} 年 {month} 月全部待办")
-        display_todos = [t for t in todos if t["status"] != "已完成"]
+        display_todos = [
+            t
+            for t in todos
+            if not t.get("parent_id")
+            and (t["status"] != "已完成" or t.get("todo_state") == "moved")
+        ]
         display_activities = []
 
     action_cols = st.columns([1, 1.4, 3.6] if selected_date else [1, 5])
@@ -382,8 +394,7 @@ def _render_calendar_todos() -> None:
     if not display_todos:
         st.info("暂无待办。")
         return
-    for todo in display_todos:
-        _render_todo_row(todo)
+    _render_todo_tree(display_todos, all_todos)
 
 
 def _render_month_nav(year: int, month: int) -> None:
@@ -455,6 +466,7 @@ def _reset_todo_form_date() -> None:
 def _reset_todo_form() -> None:
     for key in ("tf_content", "tf_cat", "tf_pri", "tf_date", "tf_rec", "tf_goal"):
         st.session_state.pop(key, None)
+    st.session_state["planning_todo_parent"] = None
 
 
 def _reset_activity_form() -> None:
@@ -624,8 +636,8 @@ def _render_selected_day_todos(todos: list[dict]) -> None:
     if not todos:
         st.info("当日暂无待办。")
         return
-    for todo in todos:
-        _render_todo_row(todo)
+    all_todos = get_calendar_todos()
+    _render_todo_tree(todos, all_todos)
 
 
 def _render_daily_activities(
@@ -1025,23 +1037,58 @@ def _render_todo_form(selected_date: str | None, year: int, month: int) -> None:
         return
 
     linkable_goals = get_annual_goals(status_filter=["未开始", "进行中"])
+    parent_id = st.session_state.get("planning_todo_parent")
+    parent = None
+    if parent_id:
+        parent = next(
+            (t for t in get_calendar_todos(year=year, month=month) if t["id"] == parent_id),
+            None,
+        )
+        if not parent or parent.get("todo_state") == "moved":
+            st.session_state["planning_todo_adding"] = False
+            st.session_state["planning_todo_parent"] = None
+            return
 
     with st.container(border=True):
-        st.markdown("#### ➕ 新增待办")
+        st.markdown("#### ➕ " + ("新增子级待办" if parent else "新增待办"))
         content = st.text_area("待办内容 *", key="tf_content")
-        category = st.selectbox("分类 *", TODO_CATEGORIES, key="tf_cat")
-        priority = st.selectbox("优先级 *", TODO_PRIORITIES, key="tf_pri")
+        category_default = parent.get("category") if parent else None
+        priority_default = parent.get("priority") if parent else None
+        category = st.selectbox(
+            "分类 *",
+            TODO_CATEGORIES,
+            index=_option_index(TODO_CATEGORIES, category_default),
+            key="tf_cat",
+        )
+        priority = st.selectbox(
+            "优先级 *",
+            TODO_PRIORITIES,
+            index=_option_index(TODO_PRIORITIES, priority_default),
+            key="tf_pri",
+        )
         default_date = (
+            _parse_date(parent.get("target_date")) if parent else None
+        ) or (
             date.fromisoformat(selected_date) if selected_date else date(year, month, 1)
         )
         target_date = st.date_input("执行日期 *", value=default_date, key="tf_date")
-        recurrence = st.selectbox("重复规则", TODO_RECURRENCES, key="tf_rec")
+        recurrence_default = parent.get("recurrence") if parent else None
+        recurrence = st.selectbox(
+            "重复规则",
+            TODO_RECURRENCES,
+            index=_option_index(TODO_RECURRENCES, recurrence_default),
+            key="tf_rec",
+        )
 
         goal_options = {None: "（不关联）"}
         goal_options.update({g["id"]: g["content"][:40] for g in linkable_goals})
+        goal_ids = list(goal_options.keys())
+        parent_goal = parent.get("linked_goal_id") if parent else None
+        goal_index = goal_ids.index(parent_goal) if parent_goal in goal_ids else 0
         linked_goal = st.selectbox(
             "关联年度目标（选填）",
-            options=list(goal_options.keys()),
+            options=goal_ids,
+            index=goal_index,
             format_func=lambda k: goal_options[k],
             key="tf_goal",
         )
@@ -1057,14 +1104,17 @@ def _render_todo_form(selected_date: str | None, year: int, month: int) -> None:
                         str(target_date),
                         recurrence,
                         linked_goal_id=linked_goal,
+                        parent_id=parent_id,
                     )
                     st.session_state["planning_todo_adding"] = False
+                    st.session_state["planning_todo_parent"] = None
                     st.rerun()
                 else:
                     st.warning("待办内容为必填项")
         with tb:
             if st.button("取消", key="tf_cancel"):
                 st.session_state["planning_todo_adding"] = False
+                st.session_state["planning_todo_parent"] = None
                 _reset_todo_form()
                 st.rerun()
 
@@ -1139,9 +1189,56 @@ def _option_index(options: list[str], value: str | None) -> int:
     return options.index(value) if value in options else 0
 
 
-def _render_todo_row(todo: dict) -> None:
+def _render_todo_tree(roots: list[dict], all_todos: list[dict]) -> None:
+    children_map: dict[str | None, list[dict]] = defaultdict(list)
+    for todo in all_todos:
+        children_map[todo.get("parent_id")].append(todo)
+    for children in children_map.values():
+        children.sort(key=lambda t: (str(t.get("target_date") or ""), str(t.get("created_at") or "")))
+    for todo in roots:
+        _render_todo_node(todo, children_map, depth=0)
+
+
+def _sync_tree_parent_completion(todos: list[dict]) -> None:
+    children_map: dict[str | None, list[dict]] = defaultdict(list)
+    by_id = {todo["id"]: todo for todo in todos}
+    for todo in todos:
+        children_map[todo.get("parent_id")].append(todo)
+
+    def visit(todo: dict) -> str:
+        children = children_map.get(todo["id"], [])
+        child_states = [visit(child) for child in children]
+        state = todo.get("todo_state", "todo")
+        if state == "moved" or not child_states:
+            return state
+        if all(s in {"done", "moved"} for s in child_states):
+            if state != "done":
+                update_calendar_todo(todo["id"], todo_state="done")
+            return "done"
+        return state
+
+    for root in children_map.get(None, []):
+        if root["id"] in by_id:
+            visit(root)
+
+
+def _render_todo_node(
+    todo: dict, children_map: dict[str | None, list[dict]], depth: int
+) -> None:
     tid = todo["id"]
-    is_done = todo["status"] == "已完成"
+    children = children_map.get(tid, [])
+    _render_todo_row(todo, children, depth)
+    expanded = st.session_state.get("planning_tree_expanded", set())
+    if children and tid in expanded:
+        for child in children:
+            _render_todo_node(child, children_map, depth + 1)
+
+
+def _render_todo_row(todo: dict, children: list[dict] | None = None, depth: int = 0) -> None:
+    tid = todo["id"]
+    children = children or []
+    moved = todo.get("todo_state") == "moved"
+    is_done = todo["status"] == "已完成" or todo.get("todo_state") in {"done", "moved"}
     priority_label = _priority_label(todo["priority"])
     content = escape(todo["content"])
     content_html = f"<s>{content}</s>" if is_done else content
@@ -1149,25 +1246,48 @@ def _render_todo_row(todo: dict) -> None:
     reflection_open = st.session_state.get("_reflection_open", {}).get(tid, False)
     postpone_open = st.session_state.get("_postpone_open", {}).get(tid, False)
     editing_open = st.session_state.get(f"_todo_editing_{tid}", False)
+    confirm_open = st.session_state.get("_todo_move_confirm", {}).get(tid, False)
+    done_leaves, total_leaves = _todo_progress(tid)
+    partial = 0 < done_leaves < total_leaves
 
     with st.container(border=True):
-        rc1, rc2, rc3, rc4 = st.columns([0.5, 5.5, 1, 1])
+        rc1, rc2, rc3, rc4, rc5, rc6 = st.columns([0.5, 0.6, 5.2, 1, 1, 1])
         with rc1:
+            st.markdown(
+                f"<div style='height:1px;width:{depth * 1.1:.1f}rem'></div>",
+                unsafe_allow_html=True,
+            )
+        with rc2:
+            expanded = st.session_state.get("planning_tree_expanded", set())
+            if children:
+                label = "▾" if tid in expanded else "▸"
+                if st.button(label, key=f"tree_toggle_{tid}", disabled=moved):
+                    expanded = set(expanded)
+                    if tid in expanded:
+                        expanded.remove(tid)
+                    else:
+                        expanded.add(tid)
+                    st.session_state["planning_tree_expanded"] = expanded
+                    st.rerun()
+            else:
+                st.caption("")
             checked = st.checkbox(
                 "",
                 value=is_done,
                 key=f"chk_{tid}",
                 label_visibility="collapsed",
+                disabled=moved,
             )
-            if checked and not is_done:
-                reflection_state = st.session_state.get("_reflection_open", {})
-                reflection_state[tid] = True
-                st.session_state["_reflection_open"] = reflection_state
-                reflection_open = True
-            elif not checked and is_done:
-                update_calendar_todo(tid, status="待办", reflection="")
+            if checked and not is_done and not moved:
+                update_todo_subtree_state(tid, "done")
+                confirm_state = st.session_state.get("_todo_move_confirm", {})
+                confirm_state[tid] = True
+                st.session_state["_todo_move_confirm"] = confirm_state
                 st.rerun()
-        with rc2:
+            elif not checked and is_done and not moved:
+                update_todo_subtree_state(tid, "todo", reflection="")
+                st.rerun()
+        with rc3:
             st.markdown(
                 f"{priority_label}<span style='{color_style}'>{content_html}</span>",
                 unsafe_allow_html=True,
@@ -1178,35 +1298,94 @@ def _render_todo_row(todo: dict) -> None:
                 if todo.get("postpone_count", 0) > 0
                 else ""
             )
+            progress = ""
+            if partial:
+                progress = f" · 完成 {done_leaves}/{total_leaves}"
+            if moved:
+                progress += " · 已移入完成事务"
             st.caption(
                 f"{todo['target_date']} · {todo['category']} · "
-                f"{todo['recurrence']}{linked}{postponed}"
+                f"{todo['recurrence']}{linked}{postponed}{progress}"
             )
-            if st.button("编辑", key=f"te_{tid}", help="编辑"):
+        with rc4:
+            if not moved and st.button("编辑", key=f"te_{tid}", help="编辑"):
                 _open_todo_editor(tid)
                 st.rerun()
-        with rc3:
-            if not is_done and st.button("延期", key=f"tp_{tid}", help="延期"):
+        with rc5:
+            if not moved and st.button("添加子级", key=f"tc_{tid}", help="添加子级"):
+                _reset_todo_form()
+                st.session_state["planning_todo_parent"] = tid
+                st.session_state["planning_todo_adding"] = True
+                expanded = set(st.session_state.get("planning_tree_expanded", set()))
+                expanded.add(tid)
+                st.session_state["planning_tree_expanded"] = expanded
+                st.rerun()
+        with rc6:
+            if not moved and not is_done and st.button("延期", key=f"tp_{tid}", help="延期"):
                 postpone_state = st.session_state.get("_postpone_open", {})
                 postpone_state[tid] = True
                 st.session_state["_postpone_open"] = postpone_state
                 postpone_open = True
-        with rc4:
-            if st.button("🗑️", key=f"td_{tid}", help="删除"):
+            if st.button("🗑️", key=f"td_{tid}", help="删除", disabled=moved):
                 delete_calendar_todo(tid)
                 st.rerun()
 
-        if editing_open:
+        if confirm_open and not moved:
+            _render_move_done_confirm(tid)
+
+        if editing_open and not moved:
             _render_todo_edit_form(todo)
 
-        if reflection_open:
+        if reflection_open and not moved:
             _render_reflection_box(tid)
 
-        if postpone_open:
+        if postpone_open and not moved:
             _render_postpone_box(tid)
 
         if is_done and todo.get("reflection"):
             st.caption(f"💬 {todo['reflection']}")
+
+
+def _render_move_done_confirm(todo_id: str) -> None:
+    with st.container(border=True):
+        st.caption("是否将此项及其子任务移入已完成事务？")
+        ca, cb = st.columns(2)
+        with ca:
+            if st.button("移入已完成事务", key=f"mv_ok_{todo_id}", type="primary"):
+                reflection_state = st.session_state.get("_reflection_open", {})
+                reflection_state[todo_id] = True
+                st.session_state["_reflection_open"] = reflection_state
+                pending = st.session_state.get("_todo_pending_move", set())
+                pending = set(pending)
+                pending.add(todo_id)
+                st.session_state["_todo_pending_move"] = pending
+                _close_move_confirm(todo_id)
+                st.rerun()
+        with cb:
+            if st.button("仅标记完成", key=f"mv_skip_{todo_id}"):
+                _close_move_confirm(todo_id)
+                st.rerun()
+
+
+def _close_move_confirm(todo_id: str) -> None:
+    confirm_state = st.session_state.get("_todo_move_confirm", {})
+    confirm_state.pop(todo_id, None)
+    st.session_state["_todo_move_confirm"] = confirm_state
+
+
+def _todo_progress(todo_id: str) -> tuple[int, int]:
+    subtree_ids = get_todo_subtree_ids(todo_id)
+    if not subtree_ids:
+        return 0, 1
+    todos = [t for t in get_calendar_todos() if t["id"] in set(subtree_ids)]
+    leaf_ids = {t["id"] for t in todos}
+    parent_ids = {t.get("parent_id") for t in todos if t.get("parent_id")}
+    leaf_ids -= parent_ids
+    leaves = [t for t in todos if t["id"] in leaf_ids]
+    if not leaves:
+        leaves = todos[:1]
+    done = sum(1 for t in leaves if t.get("todo_state") in {"done", "moved"})
+    return done, max(len(leaves), 1)
 
 
 def _open_todo_editor(todo_id: str) -> None:
@@ -1229,6 +1408,12 @@ def _close_all_todo_editors() -> None:
 
 def _render_reflection_box(todo_id: str) -> None:
     selected_date = st.session_state.get("planning_cal_date")
+    if todo_id in set(st.session_state.get("_todo_pending_move", set())):
+        todo = _find_todo_in_render_state(todo_id)
+        selected_date = selected_date or str((todo or {}).get("target_date") or "")
+        if selected_date:
+            _render_completion_activity_box(todo_id, selected_date)
+        return
     if selected_date:
         _render_completion_activity_box(todo_id, selected_date)
         return
@@ -1325,7 +1510,7 @@ def _complete_todo_with_activity_time(
     duration: int | None,
 ) -> None:
     todo = _find_todo_in_render_state(todo_id)
-    complete_todo(todo_id, reflection)
+    update_todo_subtree_state(todo_id, "done", reflection=reflection)
     if todo and start_time:
         create_daily_activity(
             selected_date,
@@ -1336,13 +1521,15 @@ def _complete_todo_with_activity_time(
             end_time=end_time or None,
         )
         st.session_state["planning_record_moment_date"] = selected_date
+    _mark_pending_move_if_needed(todo_id)
     _close_reflection(todo_id)
     _reset_completion_time(todo_id)
     st.rerun()
 
 
 def _complete_todo_only(todo_id: str, reflection: str) -> None:
-    complete_todo(todo_id, reflection)
+    update_todo_subtree_state(todo_id, "done", reflection=reflection)
+    _mark_pending_move_if_needed(todo_id)
     _close_reflection(todo_id)
     _reset_completion_time(todo_id)
     st.rerun()
@@ -1350,7 +1537,8 @@ def _complete_todo_only(todo_id: str, reflection: str) -> None:
 
 def _complete_todo_and_prefill_activity(todo_id: str, reflection: str) -> None:
     todo = _find_todo_in_render_state(todo_id)
-    complete_todo(todo_id, reflection)
+    update_todo_subtree_state(todo_id, "done", reflection=reflection)
+    _mark_pending_move_if_needed(todo_id)
     _close_reflection(todo_id)
     if todo:
         _reset_activity_form()
@@ -1367,10 +1555,22 @@ def _complete_todo_and_prefill_activity(todo_id: str, reflection: str) -> None:
     st.rerun()
 
 
+def _mark_pending_move_if_needed(todo_id: str) -> None:
+    pending = set(st.session_state.get("_todo_pending_move", set()))
+    if todo_id not in pending:
+        return
+    mark_todo_subtree_moved(todo_id)
+    pending.remove(todo_id)
+    st.session_state["_todo_pending_move"] = pending
+
+
 def _find_todo_in_render_state(todo_id: str) -> dict | None:
     year = st.session_state.get("planning_cal_year", datetime.now().year)
     month = st.session_state.get("planning_cal_month", datetime.now().month)
     for todo in get_calendar_todos(year=year, month=month):
+        if todo["id"] == todo_id:
+            return todo
+    for todo in get_calendar_todos():
         if todo["id"] == todo_id:
             return todo
     return None

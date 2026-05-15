@@ -388,11 +388,11 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 #### `_render_calendar_todos() -> None`
 - **功能**：月份导航、周一到周日的方格月历、日期选择、日期内待办摘要、事务数量提示、本月事务时长统计、选中日期的待办事宜与今日事务、整月待办列表、新增待办入口
-- **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `planning_activity_editing` / `planning_activity_prefill`
+- **依赖 session_state**：`planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_todo_parent` / `planning_tree_expanded` / `planning_activity_adding` / `planning_activity_editing` / `planning_activity_prefill`
 - **过期迁移**：当当前渲染月份与上次迁移月份不同时，调用 `migrate_overdue_todos(year, month)`；迁移数大于 0 时在顶部显示一次性提示
 - **视觉约定**：星期标题与日期格共用同一列规格；日期格使用 HTML 信息块展示日期数字、最多 3 条待办摘要和今日事务数量提示；待办摘要前置小号彩色边框优先级标签；待办与事务之间用分隔线区分，超出显示 `+N 更多`；今日和选中日期有不同高亮
 - **交互约定**：选中具体日期后新增待办默认填入该日期；日期视图提供返回月份视图入口，清空 `planning_cal_date`
-- **过滤约定**：月历格与月份模式的整月待办列表只展示未完成待办；选中具体日期后的待办列表仍展示全部待办
+- **过滤约定**：月历格只统计根级未完成待办；月份模式展示根级未完成待办以及已 moved 的根分支；选中具体日期后的待办列表展示当日根级待办并递归展示其子树
 - **统计约定**：月历下方固定渲染 `📊 本月时长统计` 折叠面板，数据来自 `get_monthly_activity_stats(year, month)`；无事务记录时显示 `本月暂无事务记录`
 - **注意**：重复规则只存储和展示，不在 UI 层自动生成实例；重复任务不参与跨月自动迁移
 
@@ -406,16 +406,19 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 #### `_render_todo_form(selected_date: str | None, year: int, month: int) -> None`
 - **渲染条件**：仅当 `planning_todo_adding=True` 时显示
-- **功能**：创建待办，字段包括 `content/category/priority/target_date/recurrence/linked_goal_id`
+- **功能**：创建根待办或子级待办，字段包括 `content/category/priority/target_date/recurrence/linked_goal_id`；`planning_todo_parent` 有值时创建该父节点下的子级，默认继承父节点分类、优先级、日期、重复规则与关联目标
 - **关联目标**：下拉框只展示状态为 `未开始` / `进行中` 的年度目标
 - **副作用**：保存时调用 `create_calendar_todo()`；取消/保存后关闭表单
 
 #### `_render_todo_row(todo: dict) -> None`
-- **功能**：单条待办展示、完成 checkbox、编辑、延期、删除、完成复盘、已完成心得展示
+- **功能**：单条树节点展示、完成 checkbox、展开/折叠、添加子级、编辑、延期、删除、完成复盘、已完成心得展示
+- **树形渲染**：待办列表按 `parent_id` 递归渲染；每个非 moved 节点均提供「添加子级」，子级同样递归支持；展开状态保存在 `planning_tree_expanded`
 - **编辑流程**：点击「编辑」打开内联表单，字段与新增一致（内容 / 分类 / 优先级 / 日期 / 重复 / 关联年度目标）；保存调用 `update_calendar_todo()`，同一时间只保留一个 `_todo_editing_{todo_id}` 为打开状态
-- **完成流程**：月份模式下勾选未完成待办时沿用复盘输入；确认或跳过后调用 `complete_todo()`，切到该待办日期并打开今日事务表单，写入 `planning_activity_prefill={"description": todo["content"], "category": todo["category"]}`；选中具体日期时勾选未完成待办会打开完成表单，包含开始时间 / 终止时间两组小时与分钟下拉、选填复盘；确认后调用 `complete_todo()`，若开始时间完整则调用 `create_daily_activity(selected_date, todo["content"], todo["category"], duration=..., start_time="HH:MM", end_time="HH:MM"|None)` 自动生成事务；终止时间可空，填写时不得早于开始时间；跳过只完成待办不创建事务；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
+- **完成流程**：勾选未完成节点时调用 `update_todo_subtree_state(todo_id, "done")`，该节点及全部未 moved 后代立即显示删除线与变暗；随后显示“是否将此项及其子任务移入已完成事务？”确认区。确认移入后进入含开始/终止时间的完成表单；保存后调用 `mark_todo_subtree_moved()`，分支永久置灰且禁止交互。选择仅标记完成则保留 done 状态，不写事务。
+- **父节点完成判定**：渲染时若父节点全部直接/间接叶子节点均为 done/moved，父节点自动同步为 done；部分完成时 caption 显示 `完成 X/Y`
+- **已移入节点**：`todo_state="moved"` 的节点保留在树中，使用现有已完成删除线与置灰样式；checkbox 禁用，添加子级/编辑/延期隐藏，删除禁用；后续批量完成会跳过 moved 节点
 - **延期流程**：仅未完成待办显示「延期」入口；展开内联表单后确认调用 `postpone_todo()`；`postpone_count > 0` 时信息行显示延期次数
-- **依赖 session_state**：`_reflection_open` / `_postpone_open` / `_todo_editing_{todo_id}` / `_compl_start_{todo_id}_hour` / `_compl_start_{todo_id}_minute` / `_compl_end_{todo_id}_hour` / `_compl_end_{todo_id}_minute`
+- **依赖 session_state**：`planning_tree_expanded` / `_todo_move_confirm` / `_todo_pending_move` / `_reflection_open` / `_postpone_open` / `_todo_editing_{todo_id}` / `_compl_start_{todo_id}_hour` / `_compl_start_{todo_id}_minute` / `_compl_end_{todo_id}_hour` / `_compl_end_{todo_id}_minute`
 
 #### `_render_daily_activities(selected_date: str, activities: list[dict], todos: list[dict]) -> None`
 - **渲染条件**：仅在选中具体日期时显示
