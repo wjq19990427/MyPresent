@@ -298,7 +298,7 @@ def _render_calendar_todos() -> None:
     year = st.session_state.get("planning_cal_year", datetime.now().year)
     month = st.session_state.get("planning_cal_month", datetime.now().month)
 
-    _maybe_migrate_overdue_todos(year, month)
+    _maybe_migrate_overdue_todos()
     _render_month_nav(year, month)
     migrated_count = int(st.session_state.pop("_planning_migrated_count", 0) or 0)
     if migrated_count > 0:
@@ -435,11 +435,12 @@ def _set_calendar_month(year: int, month: int) -> None:
     st.rerun()
 
 
-def _maybe_migrate_overdue_todos(year: int, month: int) -> None:
-    current_key = f"{year:04d}-{month:02d}"
+def _maybe_migrate_overdue_todos() -> None:
+    now = datetime.now()
+    current_key = f"{now.year:04d}-{now.month:02d}"
     if st.session_state.get("_planning_migrated_month") == current_key:
         return
-    migrated_count = migrate_overdue_todos(year, month)
+    migrated_count = migrate_overdue_todos(now.year, now.month)
     st.session_state["_planning_migrated_month"] = current_key
     st.session_state["_planning_migrated_count"] = migrated_count
 
