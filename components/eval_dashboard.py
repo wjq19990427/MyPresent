@@ -10,7 +10,8 @@ from core.db_manager import (
     get_llm_logs, get_llm_models, get_llm_providers,
     add_llm_provider, remove_llm_provider, update_llm_provider,
     add_llm_model, remove_llm_model, update_llm_model,
-    get_operation_logs, get_user_is_admin, create_user, list_usernames,
+    get_operation_logs, get_user_is_admin, create_user, list_users,
+    update_user_password,
 )
 from core.llm_client import call_with_config
 
@@ -400,14 +401,53 @@ def _render_admin_user_panel() -> None:
         else:
             st.success("用户已新增")
 
-    usernames = list_usernames()
+    users = list_users()
     with user_list:
-        if usernames:
-            st.markdown("**已注册用户**")
-            for username in usernames:
-                st.write(username)
+        if users:
+            st.markdown(f"**已注册 {len(users)} 位用户**")
+            for user in users:
+                with st.container(border=True):
+                    cols = st.columns([4, 1])
+                    cols[0].markdown(f"**{user['username']}**")
+                    if user["is_admin"]:
+                        cols[1].markdown("`管理员`")
+                    else:
+                        cols[1].markdown("`普通用户`")
         else:
             st.caption("暂无已注册用户。")
+
+
+def _render_password_change_panel() -> None:
+    if DEPLOY_MODE != "cloud":
+        return
+
+    current_user = st.session_state.get("_current_user")
+    if not current_user:
+        return
+
+    st.divider()
+    st.subheader("🔐 修改密码")
+    with st.form("change_password_form", clear_on_submit=True):
+        old_password = st.text_input("原密码", type="password", key="pwd_old")
+        new_password = st.text_input("新密码", type="password", key="pwd_new")
+        confirm_password = st.text_input("确认新密码", type="password", key="pwd_confirm")
+        submitted = st.form_submit_button("修改密码", type="primary")
+
+    if not submitted:
+        return
+    if not old_password or not new_password or not confirm_password:
+        st.error("请填写全部密码字段")
+        return
+    if new_password != confirm_password:
+        st.error("两次输入的新密码不一致")
+        return
+
+    try:
+        update_user_password(current_user, old_password, new_password)
+    except ValueError as exc:
+        st.error(str(exc))
+    else:
+        st.success("密码已修改")
 
 
 # ─── 看板主入口 ─────────────────────────────────────────────────────────────────────
@@ -423,6 +463,8 @@ def render_eval_dashboard() -> None:
     # ── 全局模型选择 ──────────────────────────────────────────────────────────────
     st.markdown("**🤖 当前选用模型**")
     render_model_selector(widget_key="llm_model_select_dash")
+
+    _render_password_change_panel()
 
     st.divider()
 

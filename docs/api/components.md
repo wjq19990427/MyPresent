@@ -299,8 +299,10 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 > 「📊 运行看板」Tab。LLM 配置管理 + 全局模型选择器 + 调用统计 + 数据操作记录。
 
 ### `render_eval_dashboard() -> None`
-- 四段：API 配置（折叠）→ 模型选择器 → 调用统计（指标 + 按 Skill 分组 + 最近 N 条）→ 数据操作记录
+- 五段：API 配置（折叠）→ 模型选择器 → 修改密码（cloud 已登录用户）→ 调用统计（指标 + 按 Skill 分组 + 最近 N 条）→ 数据操作记录
 - 数据来源：`get_llm_logs(limit=500)` / `get_operation_logs(limit=50)`
+- **修改密码面板**：仅 `DEPLOY_MODE=="cloud"` 且 `st.session_state["_current_user"]` 存在时渲染；校验原密码、新密码、确认密码均非空且两次新密码一致后调用 `update_user_password()`；成功显示 `密码已修改`，`ValueError` 直接提示给用户
+- **用户管理面板**：仅 cloud 管理员可见；支持新增普通用户；用户列表显示总数，并以带边框行展示 `username` 和管理员/普通用户标识
 
 ### `render_model_selector(widget_key="llm_model_select_dash") -> str | None`
 - **跨 Tab 共用**：搜索 Tab 的智能问答也调用此函数

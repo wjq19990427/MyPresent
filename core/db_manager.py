@@ -260,6 +260,23 @@ def verify_user(username: str, password: str) -> bool | None:
     return _hash_password(password, row[1]) == row[0]
 
 
+def update_user_password(username: str, old_password: str, new_password: str) -> None:
+    username = username.strip()
+    if verify_user(username, old_password) is not True:
+        raise ValueError("原密码错误")
+    if not new_password.strip():
+        raise ValueError("新密码不能为空")
+
+    salt = binascii.hexlify(os.urandom(16)).decode()
+    password_hash = _hash_password(new_password, salt)
+    db_path = config.get_global_db_path()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            "UPDATE users SET password_hash = ?, salt = ? WHERE username = ?",
+            (password_hash, salt, username),
+        )
+
+
 def get_user_is_admin(username: str) -> bool:
     db_path = config.get_global_db_path()
     with sqlite3.connect(db_path) as conn:
@@ -274,6 +291,15 @@ def list_usernames() -> list[str]:
     with sqlite3.connect(db_path) as conn:
         rows = conn.execute("SELECT username FROM users ORDER BY username ASC").fetchall()
     return [r[0] for r in rows]
+
+
+def list_users() -> list[dict]:
+    db_path = config.get_global_db_path()
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT username, is_admin FROM users ORDER BY username ASC"
+        ).fetchall()
+    return [{"username": r[0], "is_admin": bool(r[1])} for r in rows]
 
 
 def init_db() -> None:
