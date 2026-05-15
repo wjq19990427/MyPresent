@@ -14,7 +14,7 @@
    - `Minor x.Y.0`：Phase 内里程碑交付（功能对用户可见且完整），每个 Phase 不超过 5 个
    - `Major X.0.0`：Phase 阶段跃迁（Phase N 启动即打对应 minor；`v1.0.0` 保留给正式开源发布）
    - 旧 tag（v5.x 及更早）为内部迭代历史，不遵循此规则，保留存档不删除
-   - 每次打 tag 并 push 后，必须用 `gh release create <tag>` 同步发布 GitHub Release，release 文案包含：本次变更摘要 + scheme 说明（Minor/Patch）；与 tag push 在同一轮操作中完成
+   - 每次打 tag 并 push 后，必须用 `gh release create <tag>` 同步发布 GitHub Release，release 文案包含：本次变更摘要 + scheme 说明（Minor/Patch）；与 tag push 在同一轮操作中完成；**release 标题和正文一律使用中文**
 
 # Architect Posture — Token 分工原则
 
