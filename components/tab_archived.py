@@ -363,17 +363,26 @@ def _render_session_grid(sessions: list[dict], state_key: str) -> None:
 
 
 def _render_create_group(key_prefix: str) -> None:
-    with st.expander("⊕ 新建分组"):
-        input_key = f"{key_prefix}_input"
-        new_group = st.text_input("分组名称", key=input_key, placeholder="输入分组名称")
-        if st.button("创建", key=f"{key_prefix}_btn", type="primary"):
-            if new_group.strip():
-                create_group(new_group)
-                if input_key in st.session_state:
-                    del st.session_state[input_key]
-                st.rerun()
-            else:
-                st.warning("分组名不能为空")
+    st.session_state.setdefault("_archived_new_group_open", False)
+    open_state = st.session_state.get("_archived_new_group_open", False)
+    label = "▲ 收起新建分组" if open_state else "⊕ 新建分组"
+    if st.button(label, key=f"{key_prefix}_toggle"):
+        st.session_state["_archived_new_group_open"] = not open_state
+        st.rerun()
+
+    if st.session_state.get("_archived_new_group_open", False):
+        with st.container(border=True):
+            input_key = f"{key_prefix}_input"
+            new_group = st.text_input("分组名称", key=input_key, placeholder="输入分组名称")
+            if st.button("创建", key=f"{key_prefix}_btn", type="primary"):
+                if new_group.strip():
+                    create_group(new_group)
+                    st.session_state["_archived_new_group_open"] = False
+                    if input_key in st.session_state:
+                        del st.session_state[input_key]
+                    st.rerun()
+                else:
+                    st.warning("分组名不能为空")
 
 
 def _render_group_tile(
