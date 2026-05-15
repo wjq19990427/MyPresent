@@ -1037,19 +1037,21 @@ def _format_time_range(start_time: str, end_time: str) -> str:
 def _render_todo_form(selected_date: str | None, year: int, month: int) -> None:
     if not st.session_state.get("planning_todo_adding"):
         return
+    if st.session_state.get("planning_todo_parent") is not None:
+        return  # 子级新增由 _render_todo_node 就地渲染
+    _render_add_todo_form_body(
+        parent=None, selected_date=selected_date, year=year, month=month
+    )
 
+
+def _render_add_todo_form_body(
+    parent: dict | None,
+    selected_date: str | None,
+    year: int | None,
+    month: int | None,
+) -> None:
+    parent_id = parent["id"] if parent else None
     linkable_goals = get_annual_goals(status_filter=["未开始", "进行中"])
-    parent_id = st.session_state.get("planning_todo_parent")
-    parent = None
-    if parent_id:
-        parent = next(
-            (t for t in get_calendar_todos(year=year, month=month) if t["id"] == parent_id),
-            None,
-        )
-        if not parent or parent.get("todo_state") == "moved":
-            st.session_state["planning_todo_adding"] = False
-            st.session_state["planning_todo_parent"] = None
-            return
 
     with st.container(border=True):
         st.markdown("#### ➕ " + ("新增子级待办" if parent else "新增待办"))
@@ -1242,6 +1244,16 @@ def _render_todo_node(
     if children and tid in expanded:
         for child in children:
             _render_todo_node(child, children_map, depth + 1)
+
+    if (st.session_state.get("planning_todo_adding")
+            and st.session_state.get("planning_todo_parent") == tid):
+        child_depth = depth + 1
+        indent = min(child_depth * TODO_TREE_INDENT_RATIO, TODO_TREE_MAX_INDENT_RATIO)
+        gc, nc = st.columns([indent, 12])
+        with gc:
+            st.markdown(_todo_tree_gutter_html(child_depth), unsafe_allow_html=True)
+        with nc:
+            _render_add_todo_form_body(parent=todo, selected_date=None, year=None, month=None)
 
 
 def _todo_tree_gutter_html(depth: int) -> str:
