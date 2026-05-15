@@ -1515,6 +1515,30 @@ def get_monthly_activity_stats(year: int, month: int) -> dict[str, int]:
     return {str(r["category"]): int(r["total_duration"] or 0) for r in rows}
 
 
+def update_daily_activity(activity_id: str, **fields) -> None:
+    allowed = {"date", "description", "category", "duration", "start_time", "end_time"}
+    updates = {k: v for k, v in fields.items() if k in allowed}
+    if not updates:
+        return
+    if "duration" in updates:
+        updates["duration"] = int(updates["duration"] or 0)
+    for key in ("date", "description", "category", "start_time", "end_time"):
+        if key in updates:
+            updates[key] = str(updates[key] or "").strip()
+    set_clause = ", ".join(f"{k}=?" for k in updates)
+    with _conn() as conn:
+        _add_column_if_missing(
+            conn, "daily_activities", "start_time", "TEXT NOT NULL DEFAULT ''"
+        )
+        _add_column_if_missing(
+            conn, "daily_activities", "end_time", "TEXT NOT NULL DEFAULT ''"
+        )
+        conn.execute(
+            f"UPDATE daily_activities SET {set_clause} WHERE id=?",
+            (*updates.values(), activity_id),
+        )
+
+
 def delete_daily_activity(activity_id: str) -> None:
     with _conn() as conn:
         conn.execute("DELETE FROM daily_activities WHERE id=?", (activity_id,))
