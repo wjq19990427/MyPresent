@@ -1,15 +1,24 @@
-"""自动打标 Skill：评估现有标签适配度，并生成新的情感标签。"""
+"""自动打标 Skill：评估四维结构化标签适配度，并按需生成新标签。"""
 from __future__ import annotations
 
-from core.db_manager import get_tags_registry
+from core.db_manager import get_label_registry
 from core.llm_client import call_llm, LLMJsonParseError
 from core.prompts import TAGGING_SYSTEM, TAGGING_USER_TMPL
 from .base_skill import BaseSkill, SkillResult
 
 
+_FIELDS = ("domains", "attributes", "topics", "emotion_tags")
+_LABEL_TYPES = {
+    "domains": "domain",
+    "attributes": "attribute",
+    "topics": "topic",
+    "emotion_tags": "emotion",
+}
+
+
 class TaggingSkill(BaseSkill):
     name        = "tagging"
-    description = "评估现有标签适配度，并生成新的情感标签"
+    description = "评估四维结构化标签适配度，并按需生成新标签"
 
     def __init__(self, model_id: str = "") -> None:
         self.model_id = model_id
@@ -27,9 +36,9 @@ class TaggingSkill(BaseSkill):
 
         返回的 SkillResult.data 结构：
           {
-            "suggested_tags": [...],   # 来自注册表，已过滤
-            "new_tags":       [...],   # LLM 新生成的情感标签
-            "reasoning":      "...",
+            "suggested":  {"domains": [], "attributes": [], "topics": [], "emotion_tags": []},
+            "new_labels": {"domains": [], "attributes": [], "topics": [], "emotion_tags": []},
+            "reasoning":  "...",
           }
         """
         model_id = session_data.get("model_id") or self.model_id
@@ -45,17 +54,19 @@ class TaggingSkill(BaseSkill):
         if not text_content and not feeling:
             return SkillResult(success=False, error="记录内容为空，无法进行打标")
 
-        # 组装 content 字符串传入模板
-        registry = get_tags_registry()
+        registries = _label_registries()
         parts = []
         if text_content:
             parts.append(f"描述：{text_content}")
         if feeling:
             parts.append(f"感受：{feeling}")
-        parts.append(
-            f"可用标签列表：{'、'.join(registry) if registry else '（暂无预设标签）'}"
+        user_prompt = TAGGING_USER_TMPL.format(
+            domains=_format_labels(registries["domains"]),
+            attributes=_format_labels(registries["attributes"]),
+            topics=_format_labels(registries["topics"]),
+            emotion_tags=_format_labels(registries["emotion_tags"]),
+            content="\n".join(parts),
         )
-        user_prompt = TAGGING_USER_TMPL.format(content="\n".join(parts))
 
         # 调用 LLM
         try:
@@ -73,22 +84,32 @@ class TaggingSkill(BaseSkill):
             return SkillResult(success=False, error=str(exc))
 
         # 解析与校验
-        suggested = result.get("suggested_tags", [])
-        new_tags  = result.get("new_tags", [])
+        suggested_raw = result.get("suggested", {})
+        new_raw = result.get("new_labels", {})
         reasoning = result.get("reasoning", "")
 
-        if not isinstance(suggested, list) or not isinstance(new_tags, list):
-            return SkillResult(success=False, error="返回格式错误：字段不是列表")
+        if not isinstance(suggested_raw, dict) or not isinstance(new_raw, dict):
+            return SkillResult(success=False, error="返回格式错误：标签字段不是对象")
 
-        # suggested_tags 只保留注册表中存在的条目
-        valid_suggested = [t for t in suggested if t in registry]
+        suggested = _empty_tag_map()
+        new_labels = _empty_tag_map()
+        for field in _FIELDS:
+            raw_suggested = suggested_raw.get(field, [])
+            raw_new = new_raw.get(field, [])
+            if not isinstance(raw_suggested, list) or not isinstance(raw_new, list):
+                return SkillResult(success=False, error="返回格式错误：维度字段不是列表")
+            registry = set(registries[field])
+            suggested[field] = [
+                item for item in _clean_tags(raw_suggested) if item in registry
+            ][:3]
+            new_labels[field] = _clean_tags(raw_new)[:1]
 
         return SkillResult(
             success=True,
             data={
-                "suggested_tags": valid_suggested,
-                "new_tags":       [str(t).strip() for t in new_tags if str(t).strip()],
-                "reasoning":      str(reasoning),
+                "suggested": suggested,
+                "new_labels": new_labels,
+                "reasoning": str(reasoning),
             },
         )
 
@@ -105,13 +126,48 @@ class TaggingSkill(BaseSkill):
 # ── 简化的 UI 调用接口 ──────────────────────────────────────────────────────────
 
 def auto_tag_session(session: dict, model_id: str = "") -> dict:
-    """供 UI 层直接调用。返回 {suggested_tags, new_tags, reasoning}。"""
+    """供 UI 层直接调用。返回四维标签建议结构。"""
     if not model_id:
-        return {"suggested_tags": [], "new_tags": [], "reasoning": ""}
+        return _empty_result()
     result = TaggingSkill(model_id=model_id).execute(session)
     if result.success:
         return result.data
-    return {"suggested_tags": [], "new_tags": [], "reasoning": result.error}
+    data = _empty_result()
+    data["reasoning"] = result.error
+    return data
+
+
+def _label_registries() -> dict[str, list[str]]:
+    return {
+        field: [item["name"] for item in get_label_registry(label_type)]
+        for field, label_type in _LABEL_TYPES.items()
+    }
+
+
+def _format_labels(labels: list[str]) -> str:
+    return "、".join(labels) if labels else "（暂无）"
+
+
+def _empty_tag_map() -> dict[str, list[str]]:
+    return {field: [] for field in _FIELDS}
+
+
+def _empty_result() -> dict:
+    return {"suggested": _empty_tag_map(), "new_labels": _empty_tag_map(), "reasoning": ""}
+
+
+def _clean_tags(value) -> list[str]:
+    if isinstance(value, list):
+        items = value
+    elif value in (None, ""):
+        items = []
+    else:
+        items = [value]
+    return [
+        str(item).strip()
+        for item in items
+        if item is not None and str(item).strip()
+    ]
 
 
 # ── 本地测试 ────────────────────────────────────────────────────────────────────
@@ -148,8 +204,8 @@ if __name__ == "__main__":
     result = skill.execute(test_data)
 
     if result.success:
-        print(f"✅ 推荐已有标签：{result.data['suggested_tags']}")
-        print(f"✨ AI 新生成标签：{result.data['new_tags']}")
+        print(f"✅ 推荐已有标签：{result.data['suggested']}")
+        print(f"✨ AI 新生成标签：{result.data['new_labels']}")
         print(f"💬 推荐理由：{result.data['reasoning']}")
     else:
         print(f"❌ 打标失败：{result.error}")

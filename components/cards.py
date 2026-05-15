@@ -386,9 +386,8 @@ def _render_detail(
     if not isinstance(suggestions, dict):
         suggestions = {}
 
-    st.markdown("#### ✏️ 编辑字段")
-
     if is_text:
+        st.markdown("#### 1. 文本内容")
         st.markdown("**📝 文本内容**（可直接编辑，保存后同步写入文件）")
         text_body = st.text_area(
             "文本内容",
@@ -403,36 +402,60 @@ def _render_detail(
     analysis_session = _detail_analysis_session(
         session, edit_prefix, safe_sid, text_body if is_text else ""
     )
+
+    st.divider()
+    st.markdown("#### 2. 分类标签" if is_text else "#### 1. 分类标签")
+    render_ai_tag_picker(
+        analysis_session,
+        model_id=model_id,
+        state_key=f"ai_tags_{safe_sid}",
+        apply_keys={
+            "domains": f"{safe_sid}_domains",
+            "attributes": f"{safe_sid}_attributes",
+            "topics": f"{safe_sid}_topics",
+            "emotion_tags": f"{safe_sid}_emotion_tags",
+        },
+        new_tags_key=f"{safe_sid}_ai_new_tags",
+    )
+    structured_values = _render_structured_detail_fields(session, safe_sid)
+
+    st.divider()
+    st.markdown("#### 3. 内容元数据" if is_text else "#### 2. 内容元数据")
     _render_ai_content_generator(analysis_session, model_id, safe_sid)
 
-    field_values = render_field_inputs(
+    st.markdown("### 摘要")
+    st.session_state.setdefault(f"{safe_sid}_summary", str(session.get("summary", "")))
+    field_values = {
+        "summary": st.text_area(
+            "摘要",
+            key=f"{safe_sid}_summary",
+            height=90,
+        )
+    }
+    _render_inline_suggestion(
+        "summary", f"{safe_sid}_summary", suggestions, suggestions_key
+    )
+
+    field_values.update(render_field_inputs(
         edit_prefix,
         defaults=session,
         skip_keys=skip_keys,
         suggestions=suggestions,
         suggestions_key=suggestions_key,
-    )
+    ))
     if is_text:
         field_values["description"] = text_body
 
-    st.session_state.setdefault(f"{safe_sid}_summary", str(session.get("summary", "")))
-    field_values["summary"] = st.text_area(
-        "摘要",
-        key=f"{safe_sid}_summary",
+    st.session_state.setdefault(
+        f"{safe_sid}_emotion_note", str(session.get("emotion_note", ""))
+    )
+    field_values["emotion_note"] = st.text_area(
+        "情绪描述",
+        key=f"{safe_sid}_emotion_note",
         height=90,
     )
     _render_inline_suggestion(
-        "summary", f"{safe_sid}_summary", suggestions, suggestions_key
-    )
-    render_ai_tag_picker(
-        analysis_session,
-        model_id=model_id,
-        state_key=f"ai_tags_{safe_sid}",
-        apply_key=f"{safe_sid}_topics",
-        new_tags_key=f"{safe_sid}_ai_new_tags",
-    )
-    structured_values = _render_structured_detail_fields(
-        session, safe_sid, suggestions, suggestions_key
+        "emotion_note", f"{safe_sid}_emotion_note", suggestions, suggestions_key
     )
 
     groups = get_groups()
@@ -533,7 +556,7 @@ def _render_detail(
 def _render_ai_content_generator(
     analysis_session: dict, model_id: str, safe_sid: str
 ) -> None:
-    if st.button("✨ AI 生成内容", key=f"ai_content_{safe_sid}", type="secondary"):
+    if st.button("✨ AI 内容解析", key=f"ai_content_{safe_sid}", type="secondary"):
         if not model_id:
             st.warning("请先在「系统」中配置并选择一个 LLM 模型。")
             return
@@ -562,7 +585,7 @@ def _detail_analysis_session(
     session: dict, edit_prefix: str, safe_sid: str, text_body: str
 ) -> dict:
     draft = dict(session)
-    for key in ("title", "feeling", "reason"):
+    for key in ("title", "description", "feeling", "reason"):
         widget_key = f"{edit_prefix}_{key}"
         if widget_key in st.session_state:
             draft[key] = st.session_state.get(widget_key, "")
@@ -608,12 +631,9 @@ def _apply_inline_suggestion(
 def _render_structured_detail_fields(
     session: dict,
     safe_sid: str,
-    suggestions: dict | None = None,
-    suggestions_key: str = "",
 ) -> dict:
-    suggestions = suggestions or {}
     st.markdown("### 🧩 结构化标签")
-    st.caption("AI 标签建议会填入话题，也可手动调整。")
+    st.caption("AI 标签建议会填入四维标签，也可手动调整。")
     values = {}
     for field, label in _STRUCTURED_LABELS.items():
         state_key = f"{safe_sid}_{field}"
@@ -624,19 +644,7 @@ def _render_structured_detail_fields(
             options=options,
             key=state_key,
         )
-        if field == "topics":
-            _render_ai_new_tags_notice(safe_sid, values[field])
-    st.session_state.setdefault(
-        f"{safe_sid}_emotion_note", str(session.get("emotion_note", ""))
-    )
-    values["emotion_note"] = st.text_area(
-        "情绪描述",
-        key=f"{safe_sid}_emotion_note",
-        height=90,
-    )
-    _render_inline_suggestion(
-        "emotion_note", f"{safe_sid}_emotion_note", suggestions, suggestions_key
-    )
+        _render_ai_new_tags_notice(safe_sid, field, values[field])
     return values
 
 
@@ -647,11 +655,10 @@ def _structured_options(field: str, session: dict) -> list[str]:
     state_values = _clean_list(
         st.session_state.get(f"{session_state_safe_id(session)}_{field}", [])
     )
-    ai_new_tags = []
-    if field == "topics":
-        ai_new_tags = _clean_list(
-            st.session_state.get(f"{session_state_safe_id(session)}_ai_new_tags", [])
-        )
+    ai_new_state = _clean_new_label_state(
+        st.session_state.get(f"{session_state_safe_id(session)}_ai_new_tags", {})
+    )
+    ai_new_tags = _clean_list(ai_new_state.get(field, []))
     return list(dict.fromkeys([*registry, *current, *state_values, *ai_new_tags]))
 
 
@@ -686,9 +693,12 @@ def _persist_selected_structured_labels(values: dict) -> None:
         _persist_new_structured_labels(field, _clean_list(values.get(field, [])))
 
 
-def _render_ai_new_tags_notice(safe_sid: str, selected_topics: list[str]) -> None:
-    new_tags = _clean_list(st.session_state.get(f"{safe_sid}_ai_new_tags", []))
-    selected = set(_clean_list(selected_topics))
+def _render_ai_new_tags_notice(
+    safe_sid: str, field: str, selected_values: list[str]
+) -> None:
+    new_state = _clean_new_label_state(st.session_state.get(f"{safe_sid}_ai_new_tags", {}))
+    new_tags = _clean_list(new_state.get(field, []))
+    selected = set(_clean_list(selected_values))
     visible = [tag for tag in new_tags if tag in selected]
     if not visible:
         return
@@ -711,6 +721,15 @@ def _render_ai_new_tags_notice(safe_sid: str, selected_topics: list[str]) -> Non
 
 def _clear_ai_new_tags_state(safe_sid: str) -> None:
     st.session_state.pop(f"{safe_sid}_ai_new_tags", None)
+
+
+def _clean_new_label_state(value) -> dict[str, list[str]]:
+    if not isinstance(value, dict):
+        value = {}
+    return {
+        field: _clean_list(value.get(field, []))
+        for field in _STRUCTURED_LABEL_TYPES
+    }
 
 
 # ─── 标签 / 分组 管理面板 ────────────────────────────────────────────────────────

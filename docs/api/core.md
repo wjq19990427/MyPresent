@@ -481,7 +481,7 @@
 | 名称 | 用途 | 模板变量 |
 |------|------|----------|
 | `TAGGING_SYSTEM` | 打标 system | — |
-| `TAGGING_USER_TMPL` | 打标 user | `{content}` |
+| `TAGGING_USER_TMPL` | 打标 user | `{domains}` `{attributes}` `{topics}` `{emotion_tags}` `{content}` |
 | `STORY_SINGLE_SYSTEM` | 单条摘要 system | — |
 | `STORY_SINGLE_USER_TMPL` | 单条摘要 user | `{content_time}` `{description}` `{feeling}` `{reason_section}` |
 | `STORY_PERIOD_SYSTEM` | 时间段叙事 system | — |

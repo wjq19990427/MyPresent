@@ -73,11 +73,11 @@
 
 ## tagging_skill.py
 
-> 评估现有标签适配度，并生成新的情感标签。`SkillResult.data` 三字段：`suggested_tags / new_tags / reasoning`。
+> 评估四维结构化标签适配度，并按需生成新标签。`SkillResult.data` 三字段：`suggested / new_labels / reasoning`。
 
 ### `class TaggingSkill(BaseSkill)`
 
-- `name = "tagging"` · `description = "评估现有标签适配度，并生成新的情感标签"`
+- `name = "tagging"` · `description = "评估四维结构化标签适配度，并按需生成新标签"`
 
 #### `__init__(self, model_id: str = "") -> None`
 - `model_id` 可在实例级固定，也可在调用时通过 `session_data["model_id"]` 覆盖
@@ -91,15 +91,25 @@
 - **返回**：`SkillResult.data` 结构
   ```
   {
-    "suggested_tags": list[str],   # 已过滤，仅保留 tags_registry 中存在的
-    "new_tags":       list[str],   # LLM 新生成（已 strip 空值）
-    "reasoning":      str,
+    "suggested": {
+      "domains": list[str],
+      "attributes": list[str],
+      "topics": list[str],
+      "emotion_tags": list[str],
+    },
+    "new_labels": {
+      "domains": list[str],
+      "attributes": list[str],
+      "topics": list[str],
+      "emotion_tags": list[str],
+    },
+    "reasoning": str,
   }
   ```
-- **副作用**：调 `core/llm_client.call_llm`（自动写 `llm_logs`，`skill_name="tagging"`）；读 `tags_registry`
+- **副作用**：调 `core/llm_client.call_llm`（自动写 `llm_logs`，`skill_name="tagging"`）；读四维 `label_registry`
 - **失败路径**（不抛异常，转 `SkillResult(success=False, error=...)`）：
-  - 缺 `model_id` / 文本与感受全空 / JSON 解析失败 / `suggested_tags`/`new_tags` 不是 list
-- **不变量**：`suggested_tags` 必为注册表子集；非注册表条目静默丢弃
+  - 缺 `model_id` / 文本与感受全空 / JSON 解析失败 / `suggested`/`new_labels` 结构不合法
+- **不变量**：`suggested.*` 必为对应维度注册表子集，非注册表条目静默丢弃；`new_labels.*` 允许新词，每维最多保留 1 个
 
 #### `run(self, session: dict, model_id: str = "", **kwargs) -> SkillResult`
 - 向后兼容：浅拷贝 `session` 后注入 `model_id`，委托给 `execute()`
@@ -108,14 +118,14 @@
 
 #### `auto_tag_session(session: dict, model_id: str = "") -> dict`
 - **用途**：UI 层直接调用的简化接口（替代旧 stub）
-- **返回**：始终是 `{suggested_tags, new_tags, reasoning}` dict（**不**返回 `SkillResult`）
-- **失败时**：三字段空 dict，`reasoning` 字段装错误信息
-- **`model_id` 为空**：直接返回三字段空 dict，不调 LLM
+- **返回**：始终是 `{suggested, new_labels, reasoning}` dict（**不**返回 `SkillResult`）
+- **失败时**：四维标签字段均为空列表，`reasoning` 字段装错误信息
+- **`model_id` 为空**：直接返回空四维标签结构，不调 LLM
 
 ### Prompt 依赖
 
-- `core/prompts.TAGGING_SYSTEM` / `TAGGING_USER_TMPL`（变量 `{content}`）
-- 改 prompt 必须同步检查输出字段名（`suggested_tags / new_tags / reasoning`）
+- `core/prompts.TAGGING_SYSTEM` / `TAGGING_USER_TMPL`（变量 `{domains}` `{attributes}` `{topics}` `{emotion_tags}` `{content}`）
+- 改 prompt 必须同步检查输出字段名（`suggested / new_labels / reasoning`）
 
 ## analysis_skill.py
 
