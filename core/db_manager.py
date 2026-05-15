@@ -9,6 +9,7 @@ import binascii
 import calendar as cal_lib
 import hashlib
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -224,6 +225,26 @@ def init_global_db() -> None:
         conn.executescript(_GLOBAL_SCHEMA)
 
 
+def create_user(username: str, password: str) -> None:
+    username = username.strip()
+    if not username:
+        raise ValueError("用户名不能为空")
+
+    db_path = config.get_global_db_path()
+    salt = binascii.hexlify(os.urandom(16)).decode()
+    password_hash = _hash_password(password, salt)
+    try:
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO users(username,password_hash,salt,is_admin) VALUES(?,?,?,0)",
+                (username, password_hash, salt),
+            )
+    except sqlite3.IntegrityError as exc:
+        if "unique" in str(exc).lower():
+            raise ValueError("用户名已存在") from exc
+        raise
+
+
 def verify_user(username: str, password: str) -> bool | None:
     """None = 用户不存在，False = 密码错误，True = 认证通过。"""
     db_path = config.get_global_db_path()
@@ -243,6 +264,13 @@ def get_user_is_admin(username: str) -> bool:
             "SELECT is_admin FROM users WHERE username = ?", (username,)
         ).fetchone()
     return bool(row and row[0])
+
+
+def list_usernames() -> list[str]:
+    db_path = config.get_global_db_path()
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute("SELECT username FROM users ORDER BY username ASC").fetchall()
+    return [r[0] for r in rows]
 
 
 def init_db() -> None:

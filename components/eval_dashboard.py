@@ -5,11 +5,12 @@ from collections import defaultdict
 
 import streamlit as st
 
+from core.config import DEPLOY_MODE
 from core.db_manager import (
     get_llm_logs, get_llm_models, get_llm_providers,
     add_llm_provider, remove_llm_provider, update_llm_provider,
     add_llm_model, remove_llm_model, update_llm_model,
-    get_operation_logs,
+    get_operation_logs, get_user_is_admin, create_user, list_usernames,
 )
 from core.llm_client import call_with_config
 
@@ -371,6 +372,44 @@ def _render_operation_logs() -> None:
         st.caption("暂无操作记录")
 
 
+def _render_admin_user_panel() -> None:
+    if DEPLOY_MODE != "cloud":
+        return
+    if not get_user_is_admin(st.session_state.get("_current_user", "")):
+        return
+
+    st.divider()
+    st.subheader("👤 用户管理")
+    user_list = st.container()
+
+    with st.form("admin_create_user_form", clear_on_submit=True):
+        username = st.text_input("用户名", key="admin_new_username")
+        password = st.text_input(
+            "密码",
+            value="MyPresent@000",
+            type="password",
+            key="admin_new_password",
+        )
+        submitted = st.form_submit_button("新增用户", type="primary")
+
+    if submitted:
+        try:
+            create_user(username, password)
+        except ValueError as exc:
+            st.error(str(exc))
+        else:
+            st.success("用户已新增")
+
+    usernames = list_usernames()
+    with user_list:
+        if usernames:
+            st.markdown("**已注册用户**")
+            for username in usernames:
+                st.write(username)
+        else:
+            st.caption("暂无已注册用户。")
+
+
 # ─── 看板主入口 ─────────────────────────────────────────────────────────────────────
 
 def render_eval_dashboard() -> None:
@@ -392,6 +431,7 @@ def render_eval_dashboard() -> None:
     if not logs:
         st.info("暂无调用记录。使用「AI 推荐标签」或「AI 摘要」功能后，数据将显示在这里。")
         _render_operation_logs()
+        _render_admin_user_panel()
         return
 
     models_map    = {m["id"]: m["display_name"] for m in get_llm_models()}
@@ -485,3 +525,4 @@ def render_eval_dashboard() -> None:
             st.caption(f"  ⚠️ {err[:100]}")
 
     _render_operation_logs()
+    _render_admin_user_panel()
