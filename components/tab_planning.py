@@ -1298,7 +1298,7 @@ def _render_todo_row(todo: dict, children: list[dict] | None = None, depth: int 
                 st.caption("")
         with rc2:
             checked = st.checkbox(
-                "",
+                todo.get("content") or "待办",
                 value=is_done,
                 key=f"chk_{tid}",
                 label_visibility="collapsed",
