@@ -54,6 +54,8 @@ PRIORITY_COLORS = {
 CALENDAR_COL_SPEC = [1, 1, 1, 1, 1, 1, 1]
 WEEK_HEADERS = ["一", "二", "三", "四", "五", "六", "日"]
 MAX_DAY_TODOS = 3
+TODO_TREE_INDENT_RATIO = 0.55
+TODO_TREE_MAX_INDENT_RATIO = 3.3
 
 
 def format_duration(minutes: int) -> str:
@@ -1227,11 +1229,39 @@ def _render_todo_node(
 ) -> None:
     tid = todo["id"]
     children = children_map.get(tid, [])
-    _render_todo_row(todo, children, depth)
+    if depth <= 0:
+        _render_todo_row(todo, children, depth)
+    else:
+        indent_ratio = min(depth * TODO_TREE_INDENT_RATIO, TODO_TREE_MAX_INDENT_RATIO)
+        gutter_col, node_col = st.columns([indent_ratio, 12])
+        with gutter_col:
+            st.markdown(_todo_tree_gutter_html(depth), unsafe_allow_html=True)
+        with node_col:
+            _render_todo_row(todo, children, depth)
     expanded = st.session_state.get("planning_tree_expanded", set())
     if children and tid in expanded:
         for child in children:
             _render_todo_node(child, children_map, depth + 1)
+
+
+def _todo_tree_gutter_html(depth: int) -> str:
+    line_color = "#cbd5e1"
+    stem_count = max(1, min(depth, 4))
+    stems = []
+    for index in range(stem_count):
+        right = 0.38 + index * 0.34
+        stems.append(
+            "<span style='position:absolute;"
+            f"right:{right:.2f}rem;top:0;bottom:0;"
+            f"border-left:2px solid {line_color};'></span>"
+        )
+    return (
+        "<div style='position:relative;min-height:4.1rem;'>"
+        + "".join(stems)
+        + "<span style='position:absolute;right:0.38rem;top:2.05rem;"
+        f"width:.72rem;border-top:2px solid {line_color};'></span>"
+        "</div>"
+    )
 
 
 def _render_todo_row(todo: dict, children: list[dict] | None = None, depth: int = 0) -> None:
@@ -1253,11 +1283,6 @@ def _render_todo_row(todo: dict, children: list[dict] | None = None, depth: int 
     with st.container(border=True):
         rc1, rc2, rc3, rc4, rc5, rc6 = st.columns([0.5, 0.6, 5.2, 1, 1, 1])
         with rc1:
-            st.markdown(
-                f"<div style='height:1px;width:{depth * 1.1:.1f}rem'></div>",
-                unsafe_allow_html=True,
-            )
-        with rc2:
             expanded = st.session_state.get("planning_tree_expanded", set())
             if children:
                 label = "▾" if tid in expanded else "▸"
@@ -1271,6 +1296,7 @@ def _render_todo_row(todo: dict, children: list[dict] | None = None, depth: int 
                     st.rerun()
             else:
                 st.caption("")
+        with rc2:
             checked = st.checkbox(
                 "",
                 value=is_done,
