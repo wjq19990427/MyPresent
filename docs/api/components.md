@@ -412,7 +412,7 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 #### `_render_todo_row(todo: dict) -> None`
 - **功能**：单条树节点展示、完成 checkbox、展开/折叠、添加子级、编辑、延期、删除、完成复盘、已完成心得展示
-- **树形渲染**：待办列表按 `parent_id` 递归渲染；每个非 moved 节点均提供「添加子级」，子级同样递归支持；展开状态保存在 `planning_tree_expanded`
+- **树形渲染**：待办列表按 `parent_id` 递归渲染；每个非 moved 节点均提供「添加子级」，子级同样递归支持；展开状态保存在 `planning_tree_expanded`；非根节点由 `_render_todo_node()` 在整行外层产生横向缩进，并在左侧 gutter 显示树线/L 形连接线
 - **编辑流程**：点击「编辑」打开内联表单，字段与新增一致（内容 / 分类 / 优先级 / 日期 / 重复 / 关联年度目标）；保存调用 `update_calendar_todo()`，同一时间只保留一个 `_todo_editing_{todo_id}` 为打开状态
 - **完成流程**：勾选未完成节点时调用 `update_todo_subtree_state(todo_id, "done")`，该节点及全部未 moved 后代立即显示删除线与变暗；随后显示“是否将此项及其子任务移入已完成事务？”确认区。确认移入后进入含开始/终止时间的完成表单；保存后调用 `mark_todo_subtree_moved()`，分支永久置灰且禁止交互。选择仅标记完成则保留 done 状态，不写事务。
 - **父节点完成判定**：渲染时若父节点全部直接/间接叶子节点均为 done/moved，父节点自动同步为 done；部分完成时 caption 显示 `完成 X/Y`
