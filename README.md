@@ -40,22 +40,40 @@ pip install -r requirements.txt
 pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
-**首次运行 / 数据迁移（从旧版本升级）**
+**首次运行 / 旧版本数据迁移（v3 及更早 → v4+）**
 
 ```bash
-# 如果你有旧版本的 pending_db.json / mypresent_config.json / Assets/，先执行迁移：
+# 如果你有旧版本的 pending_db.json / mypresent_config.json / Assets/，先执行：
 python migrate.py
 ```
 
-迁移脚本会自动将数据导入 SQLite、文件复制到 `data/`，并将旧 JSON 重命名为 `.bak` 备份。全新安装可跳过此步骤。
+迁移脚本会自动将数据导入 SQLite、文件复制到 `data/`，并将旧 JSON 重命名为 `.bak` 备份。全新安装或 v4+ 升级可跳过此步骤。
+
+**版本升级（v4 / v5 用户）**
+
+数据库 Schema 变更已内置于启动流程，直接运行应用即可自动完成迁移。如需手动执行或验证，可使用对应的补丁脚本：
+
+```bash
+# 查看可用补丁
+ls patches/
+
+# 示例：从 v5.0.0 升级到 v5.1.0
+python patches/patch_v5.1.0.py
+```
+
+详见 [`patches/README.md`](patches/README.md)。
 
 **启动应用**
 
 ```bash
-streamlit run app.py
+# 本地访问
+python -m streamlit run app.py
+
+# 远程访问（需已配置 Cloudflare Tunnel）
+start.bat
 ```
 
-浏览器访问 `http://localhost:8501`。
+浏览器访问 `http://localhost:8501`（本地）或你的自定义域名（远程）。
 
 **环境要求**
 
@@ -63,6 +81,7 @@ streamlit run app.py
 |------|------|
 | Python | 3.9+ |
 | Streamlit | 1.33+ |
+| plotly | 5.20+ |
 | opencv-python | 4.x |
 | Pillow | 10.x+ |
 | chromadb | 0.5+ |
@@ -71,7 +90,16 @@ streamlit run app.py
 
 **配置 LLM（AI 功能）**
 
-在应用的「📊 运行看板」Tab 中，通过「管理 LLM 配置」面板添加 Provider（API 地址 + Key）和 Model，无需修改配置文件或环境变量。添加后即可使用「✨ AI 推荐标签」、「✨ AI 摘要」、「✨ 生成阶段回忆录」等功能。
+在应用的「⚙️ 系统」Tab 中，通过「管理 LLM 配置」面板添加 Provider（API 地址 + Key）和 Model，无需修改配置文件或环境变量。
+
+**配置远程访问密码（可选）**
+
+```bash
+cp .streamlit/secrets.toml.example .streamlit/secrets.toml
+# 编辑 secrets.toml，填入访问密码
+```
+
+未配置时本地直接访问，配置后外网访问须输入密码。配合 Cloudflare Tunnel 实现远程访问，详见 [`patches/README.md`](patches/README.md) 中的部署说明。
 
 ---
 
@@ -140,6 +168,7 @@ MyPresent/
 - **契约同步**：公开 API 变化必须在同一提交同步更新对应 `docs/api/*.md`
 - **Worktree 隔离**：实现工在独立 worktree 工作，禁止 push main
 - **状态快照**：`docs/STATUS.md` 由架构师按任务进展维护，单文件 ≤ 50 行
+- **并行执行设计**：架构师输出一批任务卡时，须附 Wave 并行执行指南，标注哪些任务可同时开 worktree（核心文件集不重叠）、哪些必须串行；指南格式见 `CLAUDE.md`
 
 任务卡填写见 [`docs/tasks/_template.md`](docs/tasks/_template.md)。
 
@@ -180,8 +209,8 @@ MyPresent/
 | **Phase 2** | ✅ 完成 | ChromaDB 向量库、日期过滤、语义检索、智能问答、标签 / 分组管理 |
 | **Phase 3** | ✅ 完成 | SQLite 重构（12 张规范化表）、Skills 插件体系、统一 LLM 调用层、评估看板 |
 | **Phase 4** | ✅ 完成 | AI 全面协同：AI 打标 / 感受补全 / 摘要；软删除回收站；批量管理；文件夹导入优化；操作审计日志 |
-| **Phase 5 · 当前** | ✅ 完成 | **个人规划与目标管理 + AI 分析重构**：年度目标 / 日历待办 / 今日事务；L-A-T 结构化标签体系；AnalysisSkill 统一 AI 分析；UI 全面升级（主页 / 导航 / 卡片 / 分组图库） |
-| **Phase 6** | 🔜 规划中 | **LLM 能力深化 & 数据分析**：Prompt 精调与多模型评测；情绪 / 主题趋势分析；个人洞察报告生成；数据采集流程自动化 |
+| **Phase 5** | ✅ 完成 | **个人规划与目标管理 + AI 分析重构 + 洞见模块**（v5.0–v5.1）：年度目标 / 日历待办 / 今日事务；L-A-T 结构化标签；AnalysisSkill 统一分析；情绪热力矩阵；个人洞察报告；UI 全面升级；Cloudflare Tunnel 远程访问 |
+| **Phase 6 · 当前** | 🔜 规划中 | **LLM 能力深化 & 数据分析**：Prompt 精调与多模型评测；情绪主题趋势深化；个人洞察报告增强；数据采集流程自动化 |
 
 ### Phase 5 展开：个人规划与目标管理
 
