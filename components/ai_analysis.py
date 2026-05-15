@@ -94,46 +94,75 @@ def _render_analysis_panel(
     keys = _keys(state_key)
     _reset_if_source_changed(source, keys)
     applied = st.session_state.pop(keys["apply"], None)
+    st.session_state.setdefault(keys["open"], keys["result"] in st.session_state)
 
-    with st.expander("✨ AI 分析", expanded=keys["result"] in st.session_state):
-        if not model_id:
-            st.warning("请先在「系统」中配置并选择一个 LLM 模型。")
-            return applied
+    is_open = st.session_state.get(keys["open"], False)
+    toggle_label = "▲ 收起 AI 分析" if is_open else "✨ AI 分析"
+    if st.button(toggle_label, key=f"analysis_toggle_{state_key}"):
+        st.session_state[keys["open"]] = not is_open
+        st.rerun()
 
-        if st.button("✨ AI 分析", key=f"analysis_run_all_{state_key}", type="primary"):
-            _run_analysis(source_type, source, model_id, "all", state_key=state_key)
-
-        result = st.session_state.get(keys["result"])
-        if not result:
-            st.caption("AI 会一次生成标题、摘要、结构化标签、感受与记录原因。")
-            return applied
-
-        st.session_state.setdefault(
-            keys["fields"], {field: True for field in result if field != "new_topics"}
-        )
-
-        for field in _FIELD_ORDER:
-            if field not in result:
-                continue
-            _render_field_row(
-                field, result, source_type, source, model_id, state_key, keys
+    if st.session_state.get(keys["open"], False):
+        with st.container(border=True):
+            return _render_analysis_panel_body(
+                source_type=source_type,
+                source=source,
+                model_id=model_id,
+                state_key=state_key,
+                keys=keys,
+                applied=applied,
             )
 
-        st.divider()
-        col_all, col_selected = st.columns(2)
-        with col_all:
-            if st.button("全部采纳", key=f"analysis_apply_all_{state_key}", type="primary"):
-                st.session_state[keys["apply"]] = dict(result)
-                st.rerun()
-        with col_selected:
-            if st.button("采纳勾选项", key=f"analysis_apply_checked_{state_key}"):
-                states = st.session_state.get(keys["fields"], {})
-                st.session_state[keys["apply"]] = {
-                    key: value
-                    for key, value in result.items()
-                    if key == "new_topics" or states.get(key, False)
-                }
-                st.rerun()
+    return applied
+
+
+def _render_analysis_panel_body(
+    *,
+    source_type: str,
+    source: dict,
+    model_id: str,
+    state_key: str,
+    keys: dict[str, str],
+    applied: dict | None,
+) -> dict | None:
+    if not model_id:
+        st.warning("请先在「系统」中配置并选择一个 LLM 模型。")
+        return applied
+
+    if st.button("✨ AI 分析", key=f"analysis_run_all_{state_key}", type="primary"):
+        _run_analysis(source_type, source, model_id, "all", state_key=state_key)
+
+    result = st.session_state.get(keys["result"])
+    if not result:
+        st.caption("AI 会一次生成标题、摘要、结构化标签、感受与记录原因。")
+        return applied
+
+    st.session_state.setdefault(
+        keys["fields"], {field: True for field in result if field != "new_topics"}
+    )
+
+    for field in _FIELD_ORDER:
+        if field not in result:
+            continue
+        _render_field_row(
+            field, result, source_type, source, model_id, state_key, keys
+        )
+
+    st.divider()
+    col_all, col_selected = st.columns(2)
+    with col_all:
+        if st.button("全部采纳", key=f"analysis_apply_all_{state_key}", type="primary"):
+            st.session_state[keys["apply"]] = dict(result)
+            st.rerun()
+    with col_selected:
+        if st.button("采纳勾选项", key=f"analysis_apply_checked_{state_key}"):
+            states = st.session_state.get(keys["fields"], {})
+            st.session_state[keys["apply"]] = {
+                key: value
+                for key, value in result.items()
+                if key == "new_topics" or states.get(key, False)
+            }
+            st.rerun()
 
     return applied
 
@@ -145,6 +174,7 @@ def _keys(state_key: str) -> dict[str, str]:
         "fields": f"_analysis_field_states_{safe}",
         "apply": f"_analysis_apply_payload_{safe}",
         "signature": f"_analysis_signature_{safe}",
+        "open": f"_analysis_panel_open_{safe}",
     }
 
 
@@ -156,6 +186,7 @@ def _reset_if_source_changed(source: dict, keys: dict[str, str]) -> None:
     st.session_state.pop(keys["result"], None)
     st.session_state.pop(keys["fields"], None)
     st.session_state.pop(keys["apply"], None)
+    st.session_state.pop(keys["open"], None)
 
 
 def _render_field_row(
@@ -270,6 +301,7 @@ def _run_analysis(
         st.session_state[keys["fields"]] = {
             key: True for key in skill_result.data if key != "new_topics"
         }
+    st.session_state[keys["open"]] = True
     st.rerun()
 
 

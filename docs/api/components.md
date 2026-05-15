@@ -165,7 +165,8 @@
   - `model_id`：当前选中的 LLM 模型 ID
   - `state_key`：调用方提供的状态命名空间，默认 `"upload"`
 - **行为**：
-  - 初始显示「✨ AI 分析」按钮；点击后调用 `AnalysisSkill().execute_draft(draft, model_id, fields="all")`
+  - 初始显示「✨ AI 分析」按钮；点击后通过 `_analysis_panel_open_{state_key}` 就地展开内联分析面板，再次点击「▲ 收起 AI 分析」收起
+  - 内联面板内的「✨ AI 分析」按钮调用 `AnalysisSkill().execute_draft(draft, model_id, fields="all")`；分析完成后自动保持展开
   - 结果面板按字段展示标题、摘要、领域、视角、话题、情绪、情绪描述、感受、原因；领域/视角/话题/情绪使用 badge 展示
   - 每个字段支持「↺ 重生成」展开三级 hint：无 hint 再试一次、字段预设快捷 hint、自定义 hint
   - 局部重生成只调用对应字段并合并回缓存，不清空其他字段
@@ -214,7 +215,7 @@
 - **顶部切换**：「📋 全部」保留现有筛选 + 网格 + 批量操作；「📁 分组」进入相册格浏览
 - **全部模式批量**：`batch_mode_archived=True` 时改用 `_render_batch_row`，支持批量软删除 / 加入分组 / 取消选择；加入分组通过 `update_session_groups()` 逐条合并目标 group id
 - **分组模式**：
-  - 分组列表支持新建分组；每格展示封面缩略图（第一条 final 记录首个图片/视频缩略图）或首字占位、分组名、记录数、改名、删除
+  - 分组列表支持通过内联按钮展开/收起新建分组表单；每格展示封面缩略图（第一条 final 记录首个图片/视频缩略图）或首字占位、分组名、记录数、改名、删除
   - 删除分组调用 `delete_group()`，仅删除分组与记录关联，不删除 session
   - 改名不新增 DB API：创建新分组、迁移原分组关联到新 id、删除旧分组
   - 点击分组进入详情，仅按 `load_db()` 返回的 `group_ids` 过滤该组全部 final 记录，不渲染维度筛选
