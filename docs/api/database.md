@@ -205,11 +205,13 @@
 | 字段 | 类型 | 约束 |
 |------|------|------|
 | `id` | TEXT | **PK**（`YYYYMMDD_HHMMSS_ffffff`） |
+| `parent_id` | TEXT | **FK → calendar_todos(id) ON DELETE CASCADE**，可空 | 父待办；空表示根待办 |
 | `content` | TEXT | NOT NULL |
 | `category` | TEXT | NOT NULL |
 | `priority` | TEXT | NOT NULL, default `'中'` |
 | `target_date` | TEXT | NOT NULL（`YYYY-MM-DD`） |
 | `status` | TEXT | NOT NULL, default `'待办'` |
+| `todo_state` | TEXT | NOT NULL, default `'todo'`，CHECK `todo/done/moved` | 树形待办三态：未完成 / 已完成 / 已移入完成事务 |
 | `recurrence` | TEXT | NOT NULL, default `'仅一次'` |
 | `linked_goal_id` | TEXT | **FK → annual_goals(id) ON DELETE SET NULL**，可空 |
 | `reflection` | TEXT | NOT NULL, default `''` |
@@ -279,5 +281,6 @@
 - 删除 `groups` 行 → 级联删除 `session_groups`（`update_session_fields` 调用方仍需自行清理 UI 选择状态）
 - 删除 `llm_providers` 行 → 级联删除 `llm_models`，但 `llm_logs` 保留
 - 删除 `annual_goals` 行 → 级联删除 `session_linked_goals`；`calendar_todos.linked_goal_id` 置空，待办本身保留
+- 删除父级 `calendar_todos` 行 → 级联删除全部子级待办；已移入完成事务的分支仍只是 `todo_state='moved'`，不会物理移出原树
 - 软删除 session 只改 `sessions.status/deleted_at/pre_delete_status`，不触发级联删除；永久删除才触发级联
 - 所有事务通过 `_conn()` 上下文管理器，异常自动 rollback

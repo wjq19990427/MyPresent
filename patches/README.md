@@ -15,6 +15,7 @@
 # 按版本顺序依次执行所需的补丁
 
 python patches/patch_v5.1.0.py
+python patches/patch_v5.2.0.py
 ```
 
 ## 补丁列表
@@ -22,6 +23,7 @@ python patches/patch_v5.1.0.py
 | 补丁 | 从版本 | 到版本 | 变更内容 |
 |------|--------|--------|----------|
 | `patch_v5.1.0.py` | v5.0.0 | v5.1.0 | 新增 `emotion_scores` 表；`daily_activities` 加 `start_time/end_time`；`calendar_todos` 加 `postponed_months` |
+| `patch_v5.2.0.py` | v5.1.0 | v5.2.0 | `calendar_todos` 加 `parent_id/todo_state`，支持树形待办与三态完成 |
 
 ---
 

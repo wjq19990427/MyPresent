@@ -59,12 +59,16 @@ def init_state() -> None:
         "planning_cal_month":     datetime.now().month,
         "planning_cal_date":      None,
         "planning_todo_adding":   False,
+        "planning_todo_parent":   None,
+        "planning_tree_expanded": set(),
         "planning_activity_adding": False,
         "planning_activity_editing": None,
         "planning_activity_prefill": None,
         "planning_record_moment_date": None,
         "_reflection_open":       {},
         "_postpone_open":         {},
+        "_todo_move_confirm":     {},
+        "_todo_pending_move":     set(),
         "_current_user":          None,
     }.items():
         if k not in st.session_state:

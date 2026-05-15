@@ -238,28 +238,48 @@
 
 ### Calendar Todos
 
-#### `create_calendar_todo(content: str, category: str, priority: str, target_date: str, recurrence: str = "仅一次", linked_goal_id: str | None = None) -> dict`
+#### `create_calendar_todo(content: str, category: str, priority: str, target_date: str, recurrence: str = "仅一次", linked_goal_id: str | None = None, parent_id: str | None = None) -> dict`
 - **副作用**：插入 `calendar_todos`；ID 使用 `datetime.now().strftime("%Y%m%d_%H%M%S_%f")`
 - **返回**：新建待办 dict
+- **树形结构**：`parent_id=None` 表示根待办；传入父待办 ID 时创建子级待办
 
 #### `get_calendar_todos(year: int | None = None, month: int | None = None, status_filter: list[str] | None = None) -> list[dict]`
-- **返回**：待办列表，按 `target_date ASC` 排序；传 `year/month` 时返回目标月份记录以及 `recurrence != "仅一次"` 的记录；传 `status_filter` 时再按状态过滤
+- **返回**：待办列表，按 `target_date ASC` 排序；传 `year/month` 时返回目标月份记录以及 `recurrence != "仅一次"` 的记录；传 `status_filter` 时再按状态过滤；每条含 `parent_id` 与 `todo_state`
 - **注意**：重复任务本期只存储/展示，不自动生成新实例
 
 #### `get_calendar_todo(todo_id: str) -> dict | None`
 - **返回**：单条待办，未找到返回 `None`
 
 #### `get_todos_by_goal(goal_id: str) -> list[dict]`
-- **返回**：所有 `linked_goal_id == goal_id` 的待办，全字段 dict（含 `postpone_count` / `postponed_days` / `postponed_months`），按 `target_date ASC` 排序
+- **返回**：所有 `linked_goal_id == goal_id` 的待办，全字段 dict（含 `parent_id` / `todo_state` / `postpone_count` / `postponed_days` / `postponed_months`），按 `target_date ASC` 排序
 - **约束**：不过滤状态，已完成与未完成均返回
 - **副作用**：无
 
+#### `create_child_todo(parent_id: str, content: str) -> dict`
+- **用途**：在指定父待办下创建子级待办，继承父级分类、优先级、日期、重复规则与关联目标
+- **异常**：父待办不存在时抛 `ValueError("父待办不存在")`；父待办 `todo_state="moved"` 时抛 `ValueError("已移入完成事务的待办不能添加子级")`
+
+#### `get_todo_subtree(todo_id: str) -> dict | None`
+- **返回**：指定待办及全部后代组成的递归树；每个节点含 `children` 列表；未找到返回 `None`
+- **副作用**：无
+
+#### `get_todo_subtree_ids(todo_id: str) -> list[str]`
+- **返回**：指定待办及全部后代 ID 列表
+- **副作用**：无
+
 #### `complete_todo(todo_id: str, reflection: str = "") -> None`
-- **副作用**：将待办状态改为 `已完成`，并写入复盘心得
+- **副作用**：将待办 `status` 改为 `已完成`、`todo_state` 改为 `done`，并写入复盘心得
 - **不变量**：不修改延期字段
 
 #### `update_calendar_todo(todo_id: str, **fields) -> None`
-- **副作用**：更新 `content/category/priority/target_date/status/recurrence/linked_goal_id/reflection`；其他字段静默忽略；空更新直接返回
+- **副作用**：更新 `content/category/priority/target_date/status/todo_state/recurrence/linked_goal_id/reflection/parent_id`；其他字段静默忽略；空更新直接返回
+
+#### `update_todo_subtree_state(todo_id: str, todo_state: str, reflection: str | None = None) -> None`
+- **副作用**：批量更新指定待办及全部后代的 `todo_state`；`todo_state="todo"` 同步 `status="待办"`，`done/moved` 同步 `status="已完成"`；非 moved 目标更新会跳过已 moved 节点
+- **异常**：`todo_state` 非 `todo/done/moved` 时抛 `ValueError`
+
+#### `mark_todo_subtree_moved(todo_id: str) -> None`
+- **副作用**：将指定待办及全部后代标记为 `todo_state="moved"`，用于“已移入完成事务”后的永久置灰状态
 
 #### `delete_calendar_todo(todo_id: str) -> None`
 - **副作用**：删除待办
@@ -270,7 +290,7 @@
 
 #### `migrate_overdue_todos(target_year: int, target_month: int) -> int`
 - **用途**：将目标月份之前的过期、未完成、单次待办自动迁移到目标月份
-- **行为**：仅处理 `status != "已完成"`、`target_date < YYYY-MM-01`、`recurrence == "仅一次"` 的待办；迁移后 `postponed_months += 1`
+- **行为**：仅处理根节点 `parent_id IS NULL`、`status != "已完成"`、`todo_state != "moved"`、`target_date < YYYY-MM-01`、`recurrence == "仅一次"` 的待办；迁移根节点时其未 moved 子树整体跟随迁移；迁移后 `postponed_months += 1`
 - **日期规则**：保留原日号，若超过目标月份天数则取目标月最后一天
 - **返回**：实际迁移条数；同一月份重复调用幂等
 - **约束**：不迁移重复任务，不修改 `postpone_todo()` 的按天延期字段
@@ -564,7 +584,7 @@
 - **智能问答**：`llm_selected_model` / `llm_chat_history`
 - **LLM 配置编辑**：`_editing_pvd` / `_editing_mdl` / `_draft_provider` / `_draft_model` / `_test_result` / `_draft_test_passed` / `_confirm_edit_pvd` / `_confirm_edit_mdl`
 - **杂项**：`upload_key`
-- **规划控制台**：`planning_sub_tab`（默认 `"calendar"`） / `planning_goal_editing` / `planning_cat_manager_open` / `planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `planning_activity_editing` / `planning_activity_prefill`（默认 `None`，结构为 `{"description": str, "category": str}`） / `planning_record_moment_date` / `_reflection_open` / `_postpone_open`
+- **规划控制台**：`planning_sub_tab`（默认 `"calendar"`） / `planning_goal_editing` / `planning_cat_manager_open` / `planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_todo_parent` / `planning_tree_expanded` / `planning_activity_adding` / `planning_activity_editing` / `planning_activity_prefill`（默认 `None`，结构为 `{"description": str, "category": str}`） / `planning_record_moment_date` / `_reflection_open` / `_postpone_open` / `_todo_move_confirm` / `_todo_pending_move`
 
 ### 未在此登记的运行期键（隐式）
 

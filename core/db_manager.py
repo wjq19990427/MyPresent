@@ -158,11 +158,14 @@ CREATE TABLE IF NOT EXISTS annual_goals (
 
 CREATE TABLE IF NOT EXISTS calendar_todos (
     id              TEXT PRIMARY KEY,
+    parent_id       TEXT REFERENCES calendar_todos(id) ON DELETE CASCADE,
     content         TEXT NOT NULL,
     category        TEXT NOT NULL,
     priority        TEXT NOT NULL DEFAULT '中',
     target_date     TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT '待办',
+    todo_state      TEXT NOT NULL DEFAULT 'todo'
+                    CHECK(todo_state IN ('todo', 'done', 'moved')),
     recurrence      TEXT NOT NULL DEFAULT '仅一次',
     linked_goal_id  TEXT REFERENCES annual_goals(id) ON DELETE SET NULL,
     reflection      TEXT NOT NULL DEFAULT '',
@@ -280,6 +283,22 @@ def init_db() -> None:
                 "ALTER TABLE calendar_todos "
                 "ADD COLUMN postponed_months INTEGER NOT NULL DEFAULT 0"
             )
+        _add_column_if_missing(
+            conn,
+            "calendar_todos",
+            "parent_id",
+            "TEXT REFERENCES calendar_todos(id) ON DELETE CASCADE",
+        )
+        _add_column_if_missing(
+            conn,
+            "calendar_todos",
+            "todo_state",
+            "TEXT NOT NULL DEFAULT 'todo'",
+        )
+        conn.execute(
+            "UPDATE calendar_todos SET todo_state='done' "
+            "WHERE status='已完成' AND todo_state='todo'"
+        )
         _add_column_if_missing(
             conn, "daily_activities", "start_time", "TEXT NOT NULL DEFAULT ''"
         )
@@ -1302,16 +1321,43 @@ def create_calendar_todo(
     target_date: str,
     recurrence: str = "仅一次",
     linked_goal_id: str | None = None,
+    parent_id: str | None = None,
 ) -> dict:
     tid = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     with _conn() as conn:
         conn.execute(
             "INSERT INTO calendar_todos"
-            "(id,content,category,priority,target_date,recurrence,linked_goal_id)"
-            " VALUES(?,?,?,?,?,?,?)",
-            (tid, content, category, priority, target_date, recurrence, linked_goal_id),
+            "(id,parent_id,content,category,priority,target_date,recurrence,linked_goal_id)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (
+                tid,
+                parent_id,
+                content,
+                category,
+                priority,
+                target_date,
+                recurrence,
+                linked_goal_id,
+            ),
         )
     return get_calendar_todo(tid)
+
+
+def create_child_todo(parent_id: str, content: str) -> dict:
+    parent = get_calendar_todo(parent_id)
+    if not parent:
+        raise ValueError("父待办不存在")
+    if parent.get("todo_state") == "moved":
+        raise ValueError("已移入完成事务的待办不能添加子级")
+    return create_calendar_todo(
+        content,
+        str(parent.get("category") or TODO_CATEGORIES[0]),
+        str(parent.get("priority") or TODO_PRIORITIES[1]),
+        str(parent.get("target_date") or datetime.now().date()),
+        str(parent.get("recurrence") or TODO_RECURRENCES[0]),
+        linked_goal_id=parent.get("linked_goal_id"),
+        parent_id=parent_id,
+    )
 
 
 def get_calendar_todos(
@@ -1335,6 +1381,8 @@ def get_calendar_todos(
     todos = [dict(r) for r in rows]
     if status_filter:
         todos = [t for t in todos if t["status"] in status_filter]
+    for todo in todos:
+        _normalize_todo_row(todo)
     return todos
 
 
@@ -1343,7 +1391,99 @@ def get_calendar_todo(todo_id: str) -> dict | None:
         row = conn.execute(
             "SELECT * FROM calendar_todos WHERE id=?", (todo_id,)
         ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    todo = dict(row)
+    _normalize_todo_row(todo)
+    return todo
+
+
+def get_todo_subtree(todo_id: str) -> dict | None:
+    with _conn() as conn:
+        rows = conn.execute(
+            """WITH RECURSIVE subtree AS (
+                   SELECT *, 0 AS depth FROM calendar_todos WHERE id=?
+                   UNION ALL
+                   SELECT c.*, subtree.depth + 1
+                   FROM calendar_todos c
+                   JOIN subtree ON c.parent_id = subtree.id
+               )
+               SELECT * FROM subtree ORDER BY depth ASC, target_date ASC, created_at ASC""",
+            (todo_id,),
+        ).fetchall()
+    if not rows:
+        return None
+    todos = [dict(r) for r in rows]
+    for todo in todos:
+        todo.pop("depth", None)
+        _normalize_todo_row(todo)
+    return _build_todo_tree(todos)[0]
+
+
+def get_todo_subtree_ids(todo_id: str) -> list[str]:
+    with _conn() as conn:
+        rows = conn.execute(
+            """WITH RECURSIVE subtree(id) AS (
+                   SELECT id FROM calendar_todos WHERE id=?
+                   UNION ALL
+                   SELECT c.id FROM calendar_todos c JOIN subtree ON c.parent_id=subtree.id
+               )
+               SELECT id FROM subtree""",
+            (todo_id,),
+        ).fetchall()
+    return [r["id"] for r in rows]
+
+
+def update_todo_subtree_state(
+    todo_id: str, todo_state: str, reflection: str | None = None
+) -> None:
+    if todo_state not in {"todo", "done", "moved"}:
+        raise ValueError("todo_state 必须为 todo/done/moved")
+    ids = get_todo_subtree_ids(todo_id)
+    if not ids:
+        return
+    placeholders = ",".join("?" * len(ids))
+    status = "待办" if todo_state == "todo" else "已完成"
+    with _conn() as conn:
+        params = [status, todo_state]
+        set_clause = "status=?, todo_state=?"
+        if reflection is not None:
+            set_clause += ", reflection=?"
+            params.append(reflection)
+        params.extend(ids)
+        state_filter = "" if todo_state == "moved" else " AND todo_state != 'moved'"
+        conn.execute(
+            f"UPDATE calendar_todos SET {set_clause} "
+            f"WHERE id IN ({placeholders}){state_filter}",
+            params,
+        )
+
+
+def mark_todo_subtree_moved(todo_id: str) -> None:
+    update_todo_subtree_state(todo_id, "moved")
+
+
+def _normalize_todo_row(todo: dict) -> None:
+    state = str(todo.get("todo_state") or "").strip()
+    if state not in {"todo", "done", "moved"}:
+        state = "done" if todo.get("status") == "已完成" else "todo"
+    todo["todo_state"] = state
+    todo["parent_id"] = todo.get("parent_id") or None
+    if state in {"done", "moved"}:
+        todo["status"] = "已完成"
+
+
+def _build_todo_tree(todos: list[dict]) -> list[dict]:
+    nodes = [{**todo, "children": []} for todo in todos]
+    by_id = {todo["id"]: todo for todo in nodes}
+    roots = []
+    for todo in nodes:
+        parent = by_id.get(todo.get("parent_id"))
+        if parent:
+            parent["children"].append(todo)
+        else:
+            roots.append(todo)
+    return roots
 
 
 def migrate_overdue_todos(target_year: int, target_month: int) -> int:
@@ -1359,7 +1499,9 @@ def migrate_overdue_todos(target_year: int, target_month: int) -> int:
         )
         rows = conn.execute(
             """SELECT id,target_date FROM calendar_todos
-               WHERE status != '已完成'
+               WHERE parent_id IS NULL
+                 AND status != '已完成'
+                 AND COALESCE(todo_state, 'todo') != 'moved'
                  AND target_date < ?
                  AND recurrence = '仅一次'""",
             (month_start,),
@@ -1371,11 +1513,29 @@ def migrate_overdue_todos(target_year: int, target_month: int) -> int:
                 continue
             new_day = min(original.day, days_in_month)
             new_date = f"{target_year:04d}-{target_month:02d}-{new_day:02d}"
+            ids = [
+                r["id"]
+                for r in conn.execute(
+                    """WITH RECURSIVE subtree(id) AS (
+                           SELECT id FROM calendar_todos WHERE id=?
+                           UNION ALL
+                           SELECT c.id
+                           FROM calendar_todos c
+                           JOIN subtree ON c.parent_id=subtree.id
+                           WHERE COALESCE(c.todo_state, 'todo') != 'moved'
+                       )
+                       SELECT id FROM subtree""",
+                    (row["id"],),
+                )
+            ]
+            if not ids:
+                continue
+            placeholders = ",".join("?" * len(ids))
             conn.execute(
-                """UPDATE calendar_todos
-                   SET target_date=?, postponed_months=postponed_months+1
-                   WHERE id=?""",
-                (new_date, row["id"]),
+                f"""UPDATE calendar_todos
+                    SET target_date=?, postponed_months=postponed_months+1
+                    WHERE id IN ({placeholders})""",
+                (new_date, *ids),
             )
             migrated += 1
     return migrated
@@ -1388,13 +1548,16 @@ def get_todos_by_goal(goal_id: str) -> list[dict]:
             "ORDER BY target_date ASC",
             (goal_id,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    todos = [dict(r) for r in rows]
+    for todo in todos:
+        _normalize_todo_row(todo)
+    return todos
 
 
 def complete_todo(todo_id: str, reflection: str = "") -> None:
     with _conn() as conn:
         conn.execute(
-            "UPDATE calendar_todos SET status='已完成', reflection=? WHERE id=?",
+            "UPDATE calendar_todos SET status='已完成', todo_state='done', reflection=? WHERE id=?",
             (reflection, todo_id),
         )
 
@@ -1428,13 +1591,23 @@ def update_calendar_todo(todo_id: str, **fields) -> None:
         "priority",
         "target_date",
         "status",
+        "todo_state",
         "recurrence",
         "linked_goal_id",
         "reflection",
+        "parent_id",
     }
     updates = {k: v for k, v in fields.items() if k in allowed}
     if not updates:
         return
+    if updates.get("status") == "待办" and "todo_state" not in updates:
+        updates["todo_state"] = "todo"
+    elif updates.get("status") == "已完成" and "todo_state" not in updates:
+        updates["todo_state"] = "done"
+    if updates.get("todo_state") in {"done", "moved"} and "status" not in updates:
+        updates["status"] = "已完成"
+    elif updates.get("todo_state") == "todo" and "status" not in updates:
+        updates["status"] = "待办"
     set_clause = ", ".join(f"{k}=?" for k in updates)
     with _conn() as conn:
         conn.execute(
@@ -1527,12 +1700,6 @@ def update_daily_activity(activity_id: str, **fields) -> None:
             updates[key] = str(updates[key] or "").strip()
     set_clause = ", ".join(f"{k}=?" for k in updates)
     with _conn() as conn:
-        _add_column_if_missing(
-            conn, "daily_activities", "start_time", "TEXT NOT NULL DEFAULT ''"
-        )
-        _add_column_if_missing(
-            conn, "daily_activities", "end_time", "TEXT NOT NULL DEFAULT ''"
-        )
         conn.execute(
             f"UPDATE daily_activities SET {set_clause} WHERE id=?",
             (*updates.values(), activity_id),
