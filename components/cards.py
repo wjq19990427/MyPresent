@@ -24,8 +24,8 @@ from core.db_manager import (
 from core.file_io import move_to_final
 from core.media import video_thumbnail, pil_to_png_bytes
 from components.forms import render_field_inputs
-from components.ai_analysis import render_session_ai_analysis
 from components.ai_tagging import render_ai_tag_picker
+from skills.analysis_skill import AnalysisSkill
 
 
 _STRUCTURED_LABEL_TYPES = {
@@ -381,17 +381,10 @@ def _render_detail(
             current_text_body = str(session.get("description", ""))
 
     model_id = st.session_state.get("llm_selected_model") or ""
-    analysis_session = {
-        **session,
-        "description": current_text_body if is_text else session.get("description", ""),
-    }
-    analysis_result = render_session_ai_analysis(
-        analysis_session,
-        model_id=model_id,
-        state_key=f"detail_{safe_sid}",
-    )
-    if analysis_result:
-        _apply_analysis_to_detail_form(analysis_result, edit_prefix, safe_sid)
+    suggestions_key = f"{safe_sid}_ai_content_suggestions"
+    suggestions = st.session_state.get(suggestions_key, {})
+    if not isinstance(suggestions, dict):
+        suggestions = {}
 
     st.markdown("#### ✏️ 编辑字段")
 
@@ -407,7 +400,18 @@ def _render_detail(
     else:
         text_body = ""
 
-    field_values = render_field_inputs(edit_prefix, defaults=session, skip_keys=skip_keys)
+    analysis_session = _detail_analysis_session(
+        session, edit_prefix, safe_sid, text_body if is_text else ""
+    )
+    _render_ai_content_generator(analysis_session, model_id, safe_sid)
+
+    field_values = render_field_inputs(
+        edit_prefix,
+        defaults=session,
+        skip_keys=skip_keys,
+        suggestions=suggestions,
+        suggestions_key=suggestions_key,
+    )
     if is_text:
         field_values["description"] = text_body
 
@@ -417,6 +421,9 @@ def _render_detail(
         key=f"{safe_sid}_summary",
         height=90,
     )
+    _render_inline_suggestion(
+        "summary", f"{safe_sid}_summary", suggestions, suggestions_key
+    )
     render_ai_tag_picker(
         analysis_session,
         model_id=model_id,
@@ -424,7 +431,9 @@ def _render_detail(
         apply_key=f"{safe_sid}_topics",
         new_tags_key=f"{safe_sid}_ai_new_tags",
     )
-    structured_values = _render_structured_detail_fields(session, safe_sid)
+    structured_values = _render_structured_detail_fields(
+        session, safe_sid, suggestions, suggestions_key
+    )
 
     groups = get_groups()
     if groups:
@@ -483,6 +492,7 @@ def _render_detail(
         update_session_fields(sid, field_values)
         update_session_tags(sid, topics)
         _clear_ai_new_tags_state(safe_sid)
+        st.session_state.pop(suggestions_key, None)
         st.session_state[state_key] = sid
         st.rerun()
 
@@ -506,6 +516,7 @@ def _render_detail(
             update_session_tags(sid, topics)
             move_to_final(sid)
             _clear_ai_new_tags_state(safe_sid)
+            st.session_state.pop(suggestions_key, None)
             st.session_state[state_key] = None
             st.rerun()
 
@@ -519,33 +530,90 @@ def _render_detail(
     _render_comments(session)
 
 
-def _apply_analysis_to_detail_form(
-    result: dict, edit_prefix: str, safe_sid: str
+def _render_ai_content_generator(
+    analysis_session: dict, model_id: str, safe_sid: str
 ) -> None:
-    for key in ("title", "feeling", "reason"):
-        if key in result:
-            st.session_state[f"{edit_prefix}_{key}"] = result.get(key, "")
-    if "summary" in result:
-        st.session_state[f"{safe_sid}_summary"] = str(result.get("summary") or "")
-
-    for key in ("domains", "attributes", "topics", "emotion_tags"):
-        values = _clean_list(result.get(key, []))
-        if key == "topics":
-            values = list(
-                dict.fromkeys([*values, *_clean_list(result.get("new_topics", []))])
+    if st.button("✨ AI 生成内容", key=f"ai_content_{safe_sid}", type="secondary"):
+        if not model_id:
+            st.warning("请先在「系统」中配置并选择一个 LLM 模型。")
+            return
+        with st.spinner("AI 正在生成内容建议…"):
+            result = AnalysisSkill().execute_draft(
+                analysis_session,
+                model_id,
+                fields=["title", "feeling", "reason", "summary", "emotion_note"],
+                hint="",
             )
-        st.session_state[f"{safe_sid}_{key}"] = values
+        if not result.success:
+            st.error(f"AI 内容生成失败：{result.error}")
+            return
+        suggestions = {
+            key: str(value).strip()
+            for key, value in result.data.items()
+            if key in {"title", "feeling", "reason", "summary", "emotion_note"}
+            and str(value).strip()
+        }
+        st.session_state[f"{safe_sid}_ai_content_suggestions"] = suggestions
+        st.toast("AI 内容建议已生成")
+        st.rerun()
 
-    if "emotion_note" in result:
-        st.session_state[f"{safe_sid}_emotion_note"] = str(
-            result.get("emotion_note") or ""
+
+def _detail_analysis_session(
+    session: dict, edit_prefix: str, safe_sid: str, text_body: str
+) -> dict:
+    draft = dict(session)
+    for key in ("title", "feeling", "reason"):
+        widget_key = f"{edit_prefix}_{key}"
+        if widget_key in st.session_state:
+            draft[key] = st.session_state.get(widget_key, "")
+    if f"{safe_sid}_summary" in st.session_state:
+        draft["summary"] = st.session_state.get(f"{safe_sid}_summary", "")
+    if f"{safe_sid}_emotion_note" in st.session_state:
+        draft["emotion_note"] = st.session_state.get(f"{safe_sid}_emotion_note", "")
+    if text_body:
+        draft["description"] = text_body
+    return draft
+
+
+def _render_inline_suggestion(
+    field_key: str,
+    widget_key: str,
+    suggestions: dict,
+    suggestions_key: str,
+) -> None:
+    suggestion = str(suggestions.get(field_key) or "").strip()
+    if not suggestion:
+        return
+    with st.container(border=True):
+        st.markdown(f"🤖 AI 建议：{suggestion}")
+        st.button(
+            "✓ 采纳",
+            key=f"{widget_key}_apply_ai_suggestion",
+            on_click=_apply_inline_suggestion,
+            args=(field_key, widget_key, suggestion, suggestions_key),
         )
-    st.rerun()
 
 
-def _render_structured_detail_fields(session: dict, safe_sid: str) -> dict:
+def _apply_inline_suggestion(
+    field_key: str,
+    widget_key: str,
+    suggestion: str,
+    suggestions_key: str,
+) -> None:
+    st.session_state[widget_key] = suggestion
+    if suggestions_key and isinstance(st.session_state.get(suggestions_key), dict):
+        st.session_state[suggestions_key].pop(field_key, None)
+
+
+def _render_structured_detail_fields(
+    session: dict,
+    safe_sid: str,
+    suggestions: dict | None = None,
+    suggestions_key: str = "",
+) -> dict:
+    suggestions = suggestions or {}
     st.markdown("### 🧩 结构化标签")
-    st.caption("AI 分析会填入这些字段，也可手动调整。")
+    st.caption("AI 标签建议会填入话题，也可手动调整。")
     values = {}
     for field, label in _STRUCTURED_LABELS.items():
         state_key = f"{safe_sid}_{field}"
@@ -565,6 +633,9 @@ def _render_structured_detail_fields(session: dict, safe_sid: str) -> dict:
         "情绪描述",
         key=f"{safe_sid}_emotion_note",
         height=90,
+    )
+    _render_inline_suggestion(
+        "emotion_note", f"{safe_sid}_emotion_note", suggestions, suggestions_key
     )
     return values
 

@@ -72,10 +72,11 @@
   - 归档（仅 pending）→ `move_to_final(sid)`
   - 删除按钮 → `soft_delete_session(sid)`，清空选中态并关闭详情面板
   - 纯文字 session 直接重写源 .txt 文件
-  - AI 分析产生的新结构化标签只写入当前表单 state；保存/归档前才将用户实际选中的新标签通过 `add_label` 入库
-- **依赖组件**：`forms.render_field_inputs` / `ai_analysis.render_session_ai_analysis` / `_render_comments`
+  - AI 内容生成只写入当前详情页建议缓存；字段建议逐条采纳后才写入对应 widget；保存/归档时清空建议缓存
+  - AI 标签建议只写入话题多选框与新标签缓存；保存/归档前才将用户实际选中的新标签通过 `add_label` 入库
+- **依赖组件**：`forms.render_field_inputs` / `ai_tagging.render_ai_tag_picker` / `_render_comments`
 - **已知陷阱**：widget key 用 `safe_sid = "".join(c if c.isalnum() else "_" for c in sid)` 净化，避免 streamlit 对特殊字符报错
-- **AI 功能位置**：统一 AI 分析在字段编辑区上方，pending/final 均可用；采纳后写入标题、摘要、结构化标签、情绪说明、感受与原因；详情页不再提供 StorySkill 摘要入口
+- **AI 功能位置**：详情页字段编辑区上方提供「✨ AI 生成内容」，仅生成 `title/summary/feeling/reason/emotion_note` 的内联建议；「🤖 AI 建议标签」只填入话题多选框；详情页不再渲染旧的整体 AI 分析面板，也不再提供 StorySkill 摘要入口
 - **保存控件**：详情页使用普通 `st.button` 即时按钮，不再用 `st.form`，避免 AI 组件写入 widget state 后前端不刷新
 
 ### `_render_comments(session) -> None`
@@ -98,13 +99,16 @@
 
 > `FIELD_SCHEMA` 驱动的表单字段渲染。新增字段类型只需在此增加分支。
 
-### `render_field_inputs(prefix, defaults=None, skip_keys=None) -> dict`
+### `render_field_inputs(prefix, defaults=None, skip_keys=None, suggestions=None, suggestions_key="") -> dict`
 - **入参**：
   - `prefix: str`：widget key 前缀（同页面多次渲染必须不同前缀）
   - `defaults: dict | None`：字段默认值（通常传 session 或 `{}`）
   - `skip_keys: set | None`：跳过的字段；返回值仍包含这些 key 的 `defaults` 原值
+  - `suggestions: dict[str, str] | None`：字段级 AI 文本建议；仅对 `textarea` / `text` 字段渲染内联建议块
+  - `suggestions_key: str`：建议 dict 在 `st.session_state` 中的键；采纳后从该 dict 删除对应字段
 - **返回**：`{key: 用户输入值}`，覆盖 `FIELD_SCHEMA` 全部字段
 - **副作用**：在当前 streamlit 容器渲染输入框；写 widget state（`{prefix}_{key}` 或带 `_date`/`_text` 后缀）
+- **建议块**：若 `suggestions[key]` 非空，在输入框下方显示 `🤖 AI 建议` 与「✓ 采纳」按钮；采纳会覆盖该 widget 当前值、删除对应建议并 `st.rerun()`；`date_or_text` 不显示建议块
 
 ### 字段类型分支
 
@@ -157,7 +161,7 @@
 
 ## ai_analysis.py
 
-> 统一 AI 分析面板。上传草稿走 `AnalysisSkill.execute_draft()`，已有记录详情走 `AnalysisSkill.execute()`，替代上传/待处理/已归档中的旧 AI 打标 + AI 补全组合。
+> 上传草稿统一 AI 分析面板。详情页当前不再渲染整体 AI 分析面板，改由 `cards._render_detail()` 内的内容建议与标签建议分别处理。
 
 ### `render_ai_analysis(draft: dict, model_id: str, *, state_key="upload") -> dict | None`
 - **入参**：
@@ -181,7 +185,7 @@
   - `model_id`：当前选中的 LLM 模型 ID
   - `state_key`：调用方提供的状态命名空间，避免上传页与多个详情面板互相污染
 - **行为/返回**：与 `render_ai_analysis()` 相同；底层调用 `AnalysisSkill.execute_draft(session, ...)`，使用调用方传入的当前 UI 草稿，避免待处理记录 DB 字段为空时二次查库导致「内容为空」
-- **约束**：不直接写 DB；调用方负责把采纳结果写回 UI widget 和 `update_session_fields()`
+- **约束**：保留给未来复用；当前详情页不再调用此整体分析面板；不直接写 DB，调用方负责把采纳结果写回 UI widget 和 `update_session_fields()`
 
 ---
 

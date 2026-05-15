@@ -39,10 +39,13 @@ def render_field_inputs(
     prefix: str,
     defaults: dict | None = None,
     skip_keys: set | None = None,
+    suggestions: dict[str, str] | None = None,
+    suggestions_key: str = "",
 ) -> dict:
     """根据 FIELD_SCHEMA 渲染所有字段，返回 {key: value}。"""
     defaults         = defaults or {}
     skip_keys        = skip_keys or set()
+    suggestions      = suggestions or {}
     values           = {}
     shown_opt_header = False
 
@@ -77,6 +80,7 @@ def render_field_inputs(
                 key=wkey,
                 label_visibility="collapsed",
             )
+            _render_inline_suggestion(key, wkey, suggestions, suggestions_key)
         else:
             values[key] = st.text_input(
                 field["label"],
@@ -85,5 +89,37 @@ def render_field_inputs(
                 key=wkey,
                 label_visibility="collapsed",
             )
+            _render_inline_suggestion(key, wkey, suggestions, suggestions_key)
 
     return values
+
+
+def _render_inline_suggestion(
+    field_key: str,
+    widget_key: str,
+    suggestions: dict[str, str],
+    suggestions_key: str,
+) -> None:
+    suggestion = str(suggestions.get(field_key) or "").strip()
+    if not suggestion:
+        return
+
+    with st.container(border=True):
+        st.markdown(f"🤖 AI 建议：{suggestion}")
+        st.button(
+            "✓ 采纳",
+            key=f"{widget_key}_apply_ai_suggestion",
+            on_click=_apply_inline_suggestion,
+            args=(field_key, widget_key, suggestion, suggestions_key),
+        )
+
+
+def _apply_inline_suggestion(
+    field_key: str,
+    widget_key: str,
+    suggestion: str,
+    suggestions_key: str,
+) -> None:
+    st.session_state[widget_key] = suggestion
+    if suggestions_key and isinstance(st.session_state.get(suggestions_key), dict):
+        st.session_state[suggestions_key].pop(field_key, None)
