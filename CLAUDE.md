@@ -9,6 +9,11 @@
 5. **L2 契约先行**：修改 `core/` `skills/` `components/` 任意文件前，必须先读对应 `docs/api/{layer}.md`；若改动了公开签名或语义，同步更新该文件后再算任务完成。L1 索引见 `docs/ARCHITECTURE.md`。
 6. **README 维护边界**：仅在顶层目录、协作工作流、Roadmap 阶段、依赖版本变更时改 `README.md`；模块/契约/数据结构变化只更新 `docs/api/*.md`，不动 README。
 7. **任务卡归档**：代码 push 到 main 后，将对应任务卡从 `docs/tasks/` 移至 `docs/tasks/archive/`，并在同一 commit 中完成 STATUS.md 和 CHANGELOG.md 的更新。
+8. **版本号规则**（语义版本，已于 v0.6.0 重置）：
+   - `Patch x.y.Z`：Bug修复、单个 task、小优化，随时打，无需讨论
+   - `Minor x.Y.0`：Phase 内里程碑交付（功能对用户可见且完整），每个 Phase 不超过 5 个
+   - `Major X.0.0`：Phase 阶段跃迁（Phase N 启动即打对应 minor；`v1.0.0` 保留给正式开源发布）
+   - 旧 tag（v5.x 及更早）为内部迭代历史，不遵循此规则，保留存档不删除
 
 # Architect Posture — Token 分工原则
 
