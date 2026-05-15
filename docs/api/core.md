@@ -32,12 +32,18 @@
 
 ### 全局认证库（users 表）
 
-> 以下三个函数操作 `data/database.db`（全局库），与业务数据库完全隔离。
+> 以下函数操作 `data/database.db`（全局库），与业务数据库完全隔离。
 
 #### `init_global_db() -> None`
 - **用途**：在全局库中创建 `users` 表（如不存在）；启动时在 `_check_auth()` 前调用
 - **副作用**：写 `config.get_global_db_path()`；幂等
 - **users 表结构**：`id / username(UNIQUE) / password_hash / salt / is_admin / created_at`
+
+#### `create_user(username: str, password: str) -> None`
+- **用途**：在全局库 `users` 表创建普通用户（`is_admin=0`）
+- **副作用**：写 `config.get_global_db_path()`；仅插入 `users` 表，不创建业务库目录
+- **密码算法**：与 `verify_user` 相同，PBKDF2-SHA256，20 万次迭代；每个用户独立 salt
+- **异常**：用户名去空白后为空时抛 `ValueError("用户名不能为空")`；用户名已存在时抛 `ValueError("用户名已存在")`
 
 #### `verify_user(username: str, password: str) -> bool | None`
 - **返回**：`True` = 认证通过；`False` = 密码错误；`None` = 用户不存在
@@ -47,6 +53,10 @@
 #### `get_user_is_admin(username: str) -> bool`
 - **返回**：该用户是否为管理员；用户不存在时返回 `False`
 - **副作用**：无
+
+#### `list_usernames() -> list[str]`
+- **返回**：所有已注册用户名，按字母升序排列；仅包含 `username` 字段
+- **副作用**：无（只读全局库）
 
 ### 业务库初始化
 
