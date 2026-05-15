@@ -24,12 +24,15 @@
 
 ## 最近完成
 
+- **task-52**：待办完成弹窗补充终止时间（小时/分钟分开选，自动算时长，可选留空）
+- **task-54**：已完成事务支持编辑（描述/分类/时间段/时长均可改，`update_daily_activity` 新增）
 - **bug1**：修复规划台日历翻页错误触发待办迁移；迁移逻辑改为真实时钟驱动，与 UI 视图月份解耦
 - **v5.3.0**：多用户登录体系（users 表 + PBKDF2 密码）、admin 账户 plus7、Windows SFTP 数据同步工具链（pull_data.py + setup_sync_key.ps1）、REMOTE_DEV.md 开发指南
 - **v5.2.0**：config.py 部署配置层、db/vector_db/file_io 多用户路径隔离、EMBEDDING_ENABLED 开关、CI/CD 自动部署基础设施、.gitignore 安全加固
 
 ## 待办 / TODO
 
+- [ ] **task-53**：树形待办重构（Wave 2，依赖 task-52 已合并 ✅）
 - [ ] Phase 6 深化：用户管理 UI（admin 新增 / 禁用用户）
 - [ ] Phase 6 深化：数据分析 + LLM 深化功能
 - [ ] 技术债：`_load_month_activities` 按天循环查询，可优化为单次月查询
