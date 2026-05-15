@@ -80,7 +80,7 @@ log "步骤 3：拉取最新代码"
 git pull origin main
 
 log "步骤 4：更新 Python 依赖"
-pip install -r requirements.txt --quiet
+pip install -r requirements.txt --quiet --break-system-packages
 
 log "步骤 5：重启 systemd 服务"
 systemctl restart "$SERVICE_NAME"
