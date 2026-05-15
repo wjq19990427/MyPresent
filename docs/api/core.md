@@ -292,6 +292,11 @@
 - **过滤规则**：按 `daily_activities.date` 的 `YYYY-MM` 匹配指定年月，按 `category` 分组累加 `duration`
 - **副作用**：无
 
+#### `update_daily_activity(activity_id: str, **fields) -> None`
+- **副作用**：更新指定事务实录；允许字段为 `date/description/category/duration/start_time/end_time`
+- **字段规则**：未知字段静默忽略；空更新直接返回；文本字段按字符串 strip 后落库；`duration` 转为整数
+- **时间段**：DB 层不校验开始/结束先后关系，不自动计算 `duration`；调用方负责校验与计算
+
 #### `delete_daily_activity(activity_id: str) -> None`
 - **副作用**：删除指定事务实录
 
@@ -559,7 +564,7 @@
 - **智能问答**：`llm_selected_model` / `llm_chat_history`
 - **LLM 配置编辑**：`_editing_pvd` / `_editing_mdl` / `_draft_provider` / `_draft_model` / `_test_result` / `_draft_test_passed` / `_confirm_edit_pvd` / `_confirm_edit_mdl`
 - **杂项**：`upload_key`
-- **规划控制台**：`planning_sub_tab`（默认 `"calendar"`） / `planning_goal_editing` / `planning_cat_manager_open` / `planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `planning_activity_prefill`（默认 `None`，结构为 `{"description": str, "category": str}`） / `planning_record_moment_date` / `_reflection_open` / `_postpone_open`
+- **规划控制台**：`planning_sub_tab`（默认 `"calendar"`） / `planning_goal_editing` / `planning_cat_manager_open` / `planning_goal_filter_status` / `planning_goal_filter_cat` / `planning_cal_year` / `planning_cal_month` / `planning_cal_date` / `planning_todo_adding` / `planning_activity_adding` / `planning_activity_editing` / `planning_activity_prefill`（默认 `None`，结构为 `{"description": str, "category": str}`） / `planning_record_moment_date` / `_reflection_open` / `_postpone_open`
 
 ### 未在此登记的运行期键（隐式）
 

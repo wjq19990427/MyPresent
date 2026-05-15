@@ -34,6 +34,7 @@ from core.db_manager import (
     create_daily_activity,
     delete_goal_category,
     update_annual_goal,
+    update_daily_activity,
     update_calendar_todo,
 )
 from core.llm_client import call_llm
@@ -365,6 +366,7 @@ def _render_calendar_todos() -> None:
                 st.session_state["planning_cal_date"] = None
                 st.session_state["planning_todo_adding"] = False
                 st.session_state["planning_activity_adding"] = False
+                st.session_state["planning_activity_editing"] = None
                 _close_all_todo_editors()
                 _reset_todo_form_date()
                 _reset_activity_form()
@@ -430,6 +432,7 @@ def _set_calendar_month(year: int, month: int) -> None:
     st.session_state["planning_cal_month"] = month
     st.session_state["planning_cal_date"] = None
     st.session_state["planning_activity_adding"] = False
+    st.session_state["planning_activity_editing"] = None
     _reset_todo_form_date()
     _reset_activity_form()
     st.rerun()
@@ -467,6 +470,20 @@ def _reset_activity_form() -> None:
         st.session_state.pop(key, None)
     st.session_state.pop("_af_time_pair", None)
     st.session_state["planning_activity_prefill"] = None
+
+
+def _reset_activity_edit_form(activity_id: str) -> None:
+    for suffix in (
+        "description",
+        "category",
+        "duration",
+        "start_time",
+        "end_time",
+        "start_time_custom",
+        "end_time_custom",
+    ):
+        st.session_state.pop(f"ae_{suffix}_{activity_id}", None)
+    st.session_state.pop(f"_ae_time_pair_{activity_id}", None)
 
 
 def _load_month_activities(year: int, month: int) -> dict[str, list[dict]]:
@@ -512,6 +529,7 @@ def _render_calendar_cell(
     ):
         st.session_state["planning_cal_date"] = d_str
         st.session_state["planning_activity_adding"] = False
+        st.session_state["planning_activity_editing"] = None
         _reset_activity_form()
         _reset_todo_form_date()
         st.rerun()
@@ -624,6 +642,7 @@ def _render_daily_activities(
         ):
             _reset_activity_form()
             st.session_state["planning_todo_adding"] = False
+            st.session_state["planning_activity_editing"] = None
             st.session_state["planning_activity_adding"] = True
             st.rerun()
 
@@ -716,8 +735,9 @@ def _render_activity_form(selected_date: str) -> None:
         ca, cb = st.columns(2)
         with ca:
             if st.button("💾 保存", key="af_save", type="primary"):
-                if start_error or end_error:
-                    st.warning(start_error or end_error)
+                time_error = _time_range_error(start_time, end_time)
+                if start_error or end_error or time_error:
+                    st.warning(start_error or end_error or time_error)
                 elif description.strip():
                     create_daily_activity(
                         selected_date,
@@ -832,6 +852,7 @@ def _infer_activity_topics(activities: list[dict]) -> list[str]:
 
 
 def _render_activity_row(activity: dict) -> None:
+    aid = activity["id"]
     duration = int(activity.get("duration") or 0)
     duration_text = f"{duration} 分钟" if duration > 0 else "未记录时长"
     time_range = _format_time_range(
@@ -841,14 +862,99 @@ def _render_activity_row(activity: dict) -> None:
         duration_text = f"{time_range} · {duration_text}"
     description = escape(activity["description"])
     with st.container(border=True):
-        c1, c2 = st.columns([5, 1])
+        c1, c2, c3 = st.columns([5, 1, 1])
         with c1:
             st.markdown(description, unsafe_allow_html=True)
             st.caption(f"{activity['category']} · {duration_text}")
         with c2:
-            if st.button("🗑️", key=f"ad_{activity['id']}", help="删除"):
-                delete_daily_activity(activity["id"])
+            if st.button("编辑", key=f"ae_{aid}", help="编辑"):
+                st.session_state["planning_activity_editing"] = aid
+                st.session_state["planning_activity_adding"] = False
+                _reset_activity_form()
                 st.rerun()
+        with c3:
+            if st.button("🗑️", key=f"ad_{aid}", help="删除"):
+                delete_daily_activity(aid)
+                st.rerun()
+
+        if st.session_state.get("planning_activity_editing") == aid:
+            _render_activity_edit_form(activity)
+
+
+def _render_activity_edit_form(activity: dict) -> None:
+    aid = activity["id"]
+    category_index = _option_index(TODO_CATEGORIES, activity.get("category"))
+    with st.container(border=True):
+        st.markdown("#### ✏️ 编辑事务")
+        description = st.text_area(
+            "事务描述 *",
+            value=str(activity.get("description") or ""),
+            key=f"ae_description_{aid}",
+        )
+        category = st.selectbox(
+            "分类 *",
+            TODO_CATEGORIES,
+            index=category_index,
+            key=f"ae_category_{aid}",
+        )
+        _ensure_time_select_default(f"ae_start_time_{aid}", activity.get("start_time"))
+        _ensure_time_select_default(f"ae_end_time_{aid}", activity.get("end_time"))
+        start_time, start_error = _render_time_select(
+            "开始时间", f"ae_start_time_{aid}"
+        )
+        end_time, end_error = _render_time_select("结束时间", f"ae_end_time_{aid}")
+        computed_duration = _duration_between(start_time, end_time)
+        if computed_duration is not None:
+            current_pair = (start_time, end_time)
+            pair_key = f"_ae_time_pair_{aid}"
+            if st.session_state.get(pair_key) != current_pair:
+                st.session_state[f"ae_duration_{aid}"] = computed_duration
+                st.session_state[pair_key] = current_pair
+        duration = st.number_input(
+            "时长（分钟）",
+            min_value=0,
+            max_value=1440,
+            value=int(activity.get("duration") or 0),
+            step=5,
+            key=f"ae_duration_{aid}",
+        )
+
+        ca, cb = st.columns(2)
+        with ca:
+            if st.button("💾 保存", key=f"ae_save_{aid}", type="primary"):
+                time_error = _time_range_error(start_time, end_time)
+                if start_error or end_error or time_error:
+                    st.warning(start_error or end_error or time_error)
+                elif description.strip():
+                    update_daily_activity(
+                        aid,
+                        description=description.strip(),
+                        category=category,
+                        duration=int(duration),
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+                    st.session_state["planning_activity_editing"] = None
+                    _reset_activity_edit_form(aid)
+                    st.rerun()
+                else:
+                    st.warning("事务描述为必填项")
+        with cb:
+            if st.button("取消", key=f"ae_cancel_{aid}"):
+                st.session_state["planning_activity_editing"] = None
+                _reset_activity_edit_form(aid)
+                st.rerun()
+
+
+def _ensure_time_select_default(key: str, value: str | None) -> None:
+    if key in st.session_state:
+        return
+    value = str(value or "").strip()
+    st.session_state[key] = (
+        value if value in _time_options() else ("自定义…" if value else "")
+    )
+    if value and value not in _time_options():
+        st.session_state[f"{key}_custom"] = value
 
 
 def _render_time_select(label: str, key: str) -> tuple[str, str]:
@@ -900,6 +1006,12 @@ def _duration_between(start_time: str, end_time: str) -> int | None:
         return None
     delta_minutes = int((end - start).total_seconds() // 60)
     return delta_minutes if delta_minutes >= 0 else None
+
+
+def _time_range_error(start_time: str, end_time: str) -> str:
+    if start_time and end_time and _duration_between(start_time, end_time) is None:
+        return "结束时间不能早于开始时间"
+    return ""
 
 
 def _format_time_range(start_time: str, end_time: str) -> str:
