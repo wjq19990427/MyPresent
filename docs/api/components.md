@@ -413,9 +413,9 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 #### `_render_todo_row(todo: dict) -> None`
 - **功能**：单条待办展示、完成 checkbox、编辑、延期、删除、完成复盘、已完成心得展示
 - **编辑流程**：点击「编辑」打开内联表单，字段与新增一致（内容 / 分类 / 优先级 / 日期 / 重复 / 关联年度目标）；保存调用 `update_calendar_todo()`，同一时间只保留一个 `_todo_editing_{todo_id}` 为打开状态
-- **完成流程**：月份模式下勾选未完成待办时沿用复盘输入；确认或跳过后调用 `complete_todo()`，切到该待办日期并打开今日事务表单，写入 `planning_activity_prefill={"description": todo["content"], "category": todo["category"]}`；选中具体日期时勾选未完成待办会打开完成表单，包含小时下拉、分钟下拉与选填复盘，确认后调用 `complete_todo()`，若小时和分钟均已选择则调用 `create_daily_activity(selected_date, todo["content"], todo["category"], start_time="HH:MM")` 自动生成事务；跳过只完成待办不创建事务；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
+- **完成流程**：月份模式下勾选未完成待办时沿用复盘输入；确认或跳过后调用 `complete_todo()`，切到该待办日期并打开今日事务表单，写入 `planning_activity_prefill={"description": todo["content"], "category": todo["category"]}`；选中具体日期时勾选未完成待办会打开完成表单，包含开始时间 / 终止时间两组小时与分钟下拉、选填复盘；确认后调用 `complete_todo()`，若开始时间完整则调用 `create_daily_activity(selected_date, todo["content"], todo["category"], duration=..., start_time="HH:MM", end_time="HH:MM"|None)` 自动生成事务；终止时间可空，填写时不得早于开始时间；跳过只完成待办不创建事务；取消勾选已完成待办时调用 `update_calendar_todo(status="待办", reflection="")`
 - **延期流程**：仅未完成待办显示「延期」入口；展开内联表单后确认调用 `postpone_todo()`；`postpone_count > 0` 时信息行显示延期次数
-- **依赖 session_state**：`_reflection_open` / `_postpone_open` / `_todo_editing_{todo_id}` / `_compl_hour_{todo_id}` / `_compl_min_{todo_id}`
+- **依赖 session_state**：`_reflection_open` / `_postpone_open` / `_todo_editing_{todo_id}` / `_compl_start_{todo_id}_hour` / `_compl_start_{todo_id}_minute` / `_compl_end_{todo_id}_hour` / `_compl_end_{todo_id}_minute`
 
 #### `_render_daily_activities(selected_date: str, activities: list[dict], todos: list[dict]) -> None`
 - **渲染条件**：仅在选中具体日期时显示
