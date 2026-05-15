@@ -25,6 +25,7 @@ from core.file_io import move_to_final
 from core.media import video_thumbnail, pil_to_png_bytes
 from components.forms import render_field_inputs
 from components.ai_analysis import render_session_ai_analysis
+from components.ai_tagging import render_ai_tag_picker
 
 
 _STRUCTURED_LABEL_TYPES = {
@@ -416,6 +417,13 @@ def _render_detail(
         key=f"{safe_sid}_summary",
         height=90,
     )
+    render_ai_tag_picker(
+        analysis_session,
+        model_id=model_id,
+        state_key=f"ai_tags_{safe_sid}",
+        apply_key=f"{safe_sid}_topics",
+        new_tags_key=f"{safe_sid}_ai_new_tags",
+    )
     structured_values = _render_structured_detail_fields(session, safe_sid)
 
     groups = get_groups()
@@ -474,6 +482,7 @@ def _render_detail(
         _persist_selected_structured_labels(structured_values)
         update_session_fields(sid, field_values)
         update_session_tags(sid, topics)
+        _clear_ai_new_tags_state(safe_sid)
         st.session_state[state_key] = sid
         st.rerun()
 
@@ -496,6 +505,7 @@ def _render_detail(
             update_session_fields(sid, field_values)
             update_session_tags(sid, topics)
             move_to_final(sid)
+            _clear_ai_new_tags_state(safe_sid)
             st.session_state[state_key] = None
             st.rerun()
 
@@ -546,6 +556,8 @@ def _render_structured_detail_fields(session: dict, safe_sid: str) -> dict:
             options=options,
             key=state_key,
         )
+        if field == "topics":
+            _render_ai_new_tags_notice(safe_sid, values[field])
     st.session_state.setdefault(
         f"{safe_sid}_emotion_note", str(session.get("emotion_note", ""))
     )
@@ -564,7 +576,12 @@ def _structured_options(field: str, session: dict) -> list[str]:
     state_values = _clean_list(
         st.session_state.get(f"{session_state_safe_id(session)}_{field}", [])
     )
-    return list(dict.fromkeys([*registry, *current, *state_values]))
+    ai_new_tags = []
+    if field == "topics":
+        ai_new_tags = _clean_list(
+            st.session_state.get(f"{session_state_safe_id(session)}_ai_new_tags", [])
+        )
+    return list(dict.fromkeys([*registry, *current, *state_values, *ai_new_tags]))
 
 
 def session_state_safe_id(session: dict) -> str:
@@ -596,6 +613,33 @@ def _persist_new_structured_labels(field: str, values: list[str]) -> None:
 def _persist_selected_structured_labels(values: dict) -> None:
     for field in _STRUCTURED_LABEL_TYPES:
         _persist_new_structured_labels(field, _clean_list(values.get(field, [])))
+
+
+def _render_ai_new_tags_notice(safe_sid: str, selected_topics: list[str]) -> None:
+    new_tags = _clean_list(st.session_state.get(f"{safe_sid}_ai_new_tags", []))
+    selected = set(_clean_list(selected_topics))
+    visible = [tag for tag in new_tags if tag in selected]
+    if not visible:
+        return
+    badges = " ".join(
+        "<span style='display:inline-block;margin:.1rem .2rem .1rem 0;"
+        "padding:.08rem .42rem;border-radius:.4rem;background:#fed7aa;"
+        "color:#9a3412;border:1px solid #fdba74;font-size:.78rem;'>"
+        f"{escape(tag)}</span>"
+        for tag in visible
+    )
+    st.markdown(
+        "<div style='margin:-.35rem 0 .8rem 0;padding:.46rem .58rem;"
+        "border-radius:.45rem;background:#fff7ed;border:1px solid #fed7aa;"
+        "color:#9a3412;font-size:.86rem;'>"
+        "🤖 AI 新增（保存后入库） "
+        f"{badges}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _clear_ai_new_tags_state(safe_sid: str) -> None:
+    st.session_state.pop(f"{safe_sid}_ai_new_tags", None)
 
 
 # ─── 标签 / 分组 管理面板 ────────────────────────────────────────────────────────
