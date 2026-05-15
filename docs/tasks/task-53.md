@@ -66,6 +66,15 @@ Schema 设计（父子关系表达方式、字段名）由 Codex 决定，但须
 
 ---
 
+## 顺手修复
+
+**`core/db_manager.py` — `update_daily_activity()` 冗余 DDL 探测**
+
+现象：`update_daily_activity()` 每次调用都执行两次 `_add_column_if_missing`（检查 `start_time` / `end_time`），而这两列在 `patch_v5.1.0` 中已存在，属于无效开销。  
+修法：删除函数内的这两次 `_add_column_if_missing` 调用即可。
+
+---
+
 ## 已知约束 / 陷阱
 
 - `migrate_overdue_todos()` 的迁移逻辑须适配树形结构：迁移根节点时，其子树整体跟随迁移，不拆散父子关系。
