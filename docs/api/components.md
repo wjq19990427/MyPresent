@@ -442,30 +442,32 @@ status==final → 分组(AND) → 文件类型(AND) → 领域OR → 话题OR �
 
 > 「让 AI 帮我选标签」交互组件。基于 `tagging_skill.auto_tag_session`。
 
-### `render_ai_tag_picker(session_data, model_id, state_key, apply_key="") -> None`
+### `render_ai_tag_picker(session_data, model_id, state_key, apply_key="", new_tags_key="") -> None`
 - **必须**在 `st.form` 外调用（依赖 `st.button` 即时回写）
 - **入参**：
   - `session_data: dict`：含 `description` / `feeling`（至少一项有值）
   - `model_id: str`：当前选中模型；空字符串时显示提示并 return
   - `state_key: str`：本组件独占的 session_state 命名空间（保证唯一）
-  - `apply_key: str`：表单内标签 multiselect 的 widget key；点击「应用」时 `del` 此 key 强制 multiselect 重新渲染
+  - `apply_key: str`：目标标签/话题 multiselect 的 widget key；点击按钮后直接合并写入该 key
+  - `new_tags_key: str`：未入库新标签的 session_state key；调用方保存时负责写入正式标签库
 - **副作用**：
-  - 调 `auto_tag_session` → 写 `_ai_tag_result_{state_key}`
-  - 用户勾选 → 写 `_ai_tag_checked_{state_key}`
-  - 应用按钮 → 调 `add_tag()` 把 `updated` 中不在 registry 的标签写入 `tags_registry`，写 `_ai_applied_tags_{state_key}`，并把选中标签合并写入 `st.session_state[apply_key]`
+  - 点击「🤖 AI 建议标签」后调用 `auto_tag_session`
+  - 将 `suggested_tags + new_tags` 去重合并写入 `st.session_state[apply_key]`
+  - 将 `new_tags` 合并写入 `st.session_state[new_tags_key]`，不写 DB
+  - 触发 `st.toast("AI 建议标签已更新，确认后保存生效")` 后 `st.rerun()`
 
 ### session_state 键空间约定
 
 | 模板 | 含义 |
 |------|------|
-| `_ai_tag_result_{state_key}` | LLM 返回的三字段 dict |
-| `_ai_tag_checked_{state_key}` | 用户当前勾选 |
-| `_ai_applied_tags_{state_key}` | 应用按钮按下时的快照——`cards._render_detail` 读此值合并到表单默认 |
+| `_ai_tag_result_{state_key}` | LLM 返回的三字段 dict，用于保留 reasoning |
+| `{new_tags_key}` | AI 新生成且尚未入库的标签列表 |
 
 ### 已知陷阱
 
-- 与 `cards._render_detail` 是**紧耦合**：`apply_key` 必须等于目标标签 multiselect 的 widget key，否则前端无法自动勾选
-- 应用按钮按下时即调 `add_tag` 入库；该组件仅保留给旧 flat tags UI 路径使用
+- 与 `cards._render_detail` 是**紧耦合**：当前详情页传入 `apply_key=f"{safe_sid}_topics"`，AI 标签直接填入「话题」多选框
+- 组件不再调用 `add_tag`；新标签保存前只存在于 session_state，详情页保存/归档时通过结构化标签持久化逻辑写入 `label_registry(type="topic")`
+- Streamlit multiselect 不能给单个选项染色；AI 新标签由 `cards.py` 在话题多选框下方以橙色提示块展示
 
 ## ai_fill.py
 
