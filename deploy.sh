@@ -80,7 +80,12 @@ log "步骤 3：拉取最新代码"
 git pull origin main
 
 log "步骤 4：更新 Python 依赖"
-pip install -r requirements.txt --quiet --break-system-packages
+VENV_DIR="$APP_DIR/.venv"
+if [[ ! -d "$VENV_DIR" ]]; then
+  python3 -m venv "$VENV_DIR"
+  log "已创建虚拟环境：$VENV_DIR"
+fi
+"$VENV_DIR/bin/pip" install -r requirements.txt --quiet
 
 log "步骤 5：重启 systemd 服务"
 systemctl restart "$SERVICE_NAME"
