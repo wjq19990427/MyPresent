@@ -42,23 +42,39 @@ if (Test-Path $KeyPath) {
     Write-Host "密钥已存在：$KeyPath，跳过生成。"
 } else {
     $Comment = "mypresent-sync-readonly-$env:COMPUTERNAME"
-    ssh-keygen -t ed25519 -f $KeyPath -C $Comment -N ''
+    # 注意：-N '""' 才能在 PowerShell 下把"空密码"正确传给 ssh-keygen
+    # 直接写 '' 会被 PowerShell 吞掉，导致 ssh-keygen 报 "option requires an argument -- N"
+    ssh-keygen -t ed25519 -f $KeyPath -C $Comment -N '""'
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "ssh-keygen 执行失败（退出码 $LASTEXITCODE）。请检查上面输出。"
+        exit 1
+    }
+    if (-not (Test-Path "$KeyPath.pub")) {
+        Write-Error "ssh-keygen 看似成功但未生成 .pub 文件。请删除 $KeyPath 后重试。"
+        exit 1
+    }
     Write-Host "密钥已生成：$KeyPath"
 }
 
-$PubKey     = (Get-Content "$KeyPath.pub").Trim()
-$DataDir    = "$SyncAppDir/data/users/$SyncUsername"
+$PubKey   = (Get-Content "$KeyPath.pub").Trim()
+$DataDir  = "$SyncAppDir/data/users/$SyncUsername"
+
+# 用单引号 + 字符串拼接构造，避开 PowerShell 双引号转义嵌套地狱
+$AuthLine = 'command="internal-sftp -R",no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding ' + $PubKey
+$InnerEcho = "echo '" + $AuthLine + "' >> ~/.ssh/authorized_keys"
+$SshCmd    = '  ssh -p ' + $SyncPort + ' ' + $SyncUser + '@' + $SyncHost + ' "' + $InnerEcho + '"'
 
 Write-Host ""
 Write-Host "========================================================="
 Write-Host "请将以下内容追加到服务器 ~/.ssh/authorized_keys："
 Write-Host "========================================================="
-Write-Host "command=`"internal-sftp -R`",no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding $PubKey"
+Write-Host $AuthLine
 Write-Host "========================================================="
 Write-Host ""
 Write-Host "可在本机 PowerShell 运行以下命令一步完成（需要能正常 SSH 登录服务器）："
 Write-Host ""
-Write-Host "  ssh -p $SyncPort ${SyncUser}@${SyncHost} `"echo 'command=\`"internal-sftp -R\`",no-pty,no-agent-forwarding,no-port-forwarding,no-X11-forwarding $PubKey' >> ~/.ssh/authorized_keys`""
+Write-Host $SshCmd
 Write-Host ""
-Write-Host "完成后运行以下命令拉取数据："
-Write-Host "  python scripts\pull_data.py"
+Write-Host "完成后可用以下命令拉取数据："
+Write-Host "  MyPresent 项目数据（含媒体文件）：python D:\MyPresent\scripts\pull_data.py"
+Write-Host "  自媒体素材分析（仅数据库）：     python E:\个人\自媒体\scripts\pull_db.py"

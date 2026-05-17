@@ -118,12 +118,20 @@ def main() -> None:
         sftp.get(f"{remote_base}/database.db", str(tmp_db))
 
         # ── 4. SQLite 完整性校验 ─────────────────────────────────────────────
+        # ⚠️ Windows 下必须显式 close()，否则文件句柄会锁住 .tmp，导致下一步 move 失败
         print(">>> 校验数据库完整性...")
+        conn = None
         try:
-            result = sqlite3.connect(str(tmp_db)).execute("PRAGMA integrity_check").fetchone()[0]
+            conn = sqlite3.connect(str(tmp_db))
+            result = conn.execute("PRAGMA integrity_check").fetchone()[0]
         except Exception as e:
+            if conn is not None:
+                conn.close()
             tmp_db.unlink(missing_ok=True)
             sys.exit(f"校验异常（{e}），已中止")
+        finally:
+            if conn is not None:
+                conn.close()
 
         if result != "ok":
             tmp_db.unlink(missing_ok=True)

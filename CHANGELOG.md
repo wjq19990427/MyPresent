@@ -22,6 +22,7 @@
 
 ### Bug修复
 - 规划台日历切换月份不再触发待办迁移，迁移改由真实系统时钟驱动（`tab_planning.py` · #bug1）
+- 修复 Windows 下 SSH 同步链路三处问题：`setup_sync_key.ps1` 引号嵌套与 ssh-keygen 空密码参数被吞；`pull_data.py` 中 SQLite 连接未显式关闭导致文件锁
 
 ---
 
